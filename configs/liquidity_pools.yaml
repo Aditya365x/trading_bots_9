@@ -1,0 +1,27 @@
+# Liquidity Pools Pro — sweep-and-reverse
+name: liquidity_pools
+strategy: liquidity_pools
+symbols: [ZECUSDT]    # unique coin -> no position clash on shared account
+timeframe: 5m
+market: futures
+
+leverage: 1
+risk_per_trade_pct: 1.0
+max_position_usdt: 0
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  pivot_len: 8
+  right_confirm: 2
+  atr_tolerance: 0.25
+  max_lookback: 200
+  half_life_bars: 150
+  min_strength_signal: 25
+  require_body_reversal: true
+  atr_len_risk: 14
+  risk_preset: "Balanced"

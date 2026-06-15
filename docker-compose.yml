@@ -1,0 +1,45 @@
+# Run all 9 bots as separate containers. They share one image and the .env
+# (testnet keys + Telegram). Each bot = one service = one process.
+#
+#   docker compose build
+#   docker compose up -d            # start all 9
+#   docker compose logs -f precision_sniper
+#   docker compose down            # stop all
+#
+# To run only some bots:  docker compose up -d precision_sniper pulse_trend_radar
+
+x-bot: &bot
+  build: .
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - ./logs:/app/logs
+
+services:
+  precision_sniper:
+    <<: *bot
+    environment: { CONFIG: configs/precision_sniper.yaml }
+  breakout_pattern:
+    <<: *bot
+    environment: { CONFIG: configs/breakout_pattern.yaml }
+  pulse_trend_radar:
+    <<: *bot
+    environment: { CONFIG: configs/pulse_trend_radar.yaml }
+  synapse_trail_pro:
+    <<: *bot
+    environment: { CONFIG: configs/synapse_trail_pro.yaml }
+  adaptive_fib_trailing:
+    <<: *bot
+    environment: { CONFIG: configs/adaptive_fib_trailing.yaml }
+  meridian_flow:
+    <<: *bot
+    environment: { CONFIG: configs/meridian_flow.yaml }
+  liquidity_pools:
+    <<: *bot
+    environment: { CONFIG: configs/liquidity_pools.yaml }
+  fib_structure_engine:
+    <<: *bot
+    environment: { CONFIG: configs/fib_structure_engine.yaml }
+  ict_session_zones:
+    <<: *bot
+    environment: { CONFIG: configs/ict_session_zones.yaml }

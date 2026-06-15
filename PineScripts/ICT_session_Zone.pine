@@ -1,0 +1,965 @@
+//@version=6
+// ══════════════════════════════════════════════════════════
+// ICT SESSION ZONES & SWEEP SIGNALS [WillyAlgoTrader]
+// ══════════════════════════════════════════════════════════
+// Author:  Willy | WillyAlgoTrader
+
+indicator(
+    title              = "ICT Session Zones & Sweep Signals [WillyAlgoTrader]",
+    shorttitle         = "ICT Zones NT",
+    overlay            = true,
+    max_lines_count    = 500,
+    max_labels_count   = 500,
+    max_boxes_count    = 500,
+    max_bars_back      = 5000)
+
+// ══════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════
+GRP_MAIN    = "⚙️ Main Settings"
+GRP_KZ      = "📦 Killzones"
+GRP_PIVOTS  = "📏 Session Pivots"
+GRP_SWEEP   = "🎯 Sweep Signals"
+GRP_DWM     = "📅 Day / Week / Month"
+GRP_OPENS   = "🕐 Opening Prices"
+GRP_VERT    = "📍 Timestamps"
+GRP_VISUAL  = "🎨 Visual Settings"
+GRP_DASH    = "📊 Dashboard"
+GRP_ALERT   = "🔔 Alerts"
+GRP_COLORS  = "🎨 Colors"
+
+INDICATOR_VERSION = "v1.1.0"
+int WARMUP_BARS   = 50
+
+// ══════════════════════════════════════
+// INPUTS — MAIN
+// ══════════════════════════════════════
+timezoneInput = input.string("GMT+0", "Timezone", options = ["America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Europe/Moscow", "Asia/Tokyo", "Asia/Shanghai", "Asia/Kolkata", "Australia/Sydney", "GMT+0", "GMT+1", "GMT+2", "GMT+3", "GMT+4", "GMT+5", "GMT+6", "GMT+7", "GMT+8", "GMT+9", "GMT+10", "GMT+11", "GMT+12", "GMT-1", "GMT-2", "GMT-3", "GMT-4", "GMT-5", "GMT-6", "GMT-7", "GMT-8", "GMT-9", "GMT-10", "GMT-11", "GMT-12"], group = GRP_MAIN, tooltip = "Timezone for session calculations.\nDefault: America/New_York (EST/EDT)\nChoose your broker or exchange timezone for accurate killzone alignment")
+tfLimitInput = input.timeframe("30", "Timeframe Limit", group = GRP_MAIN, tooltip = "Drawings hide on timeframes >= this value.\nRecommended: 30 (shows on 1m-15m charts)\nSet higher to see on larger timeframes")
+maxSessionsInput = input.int(3, "Session History", minval = 1, maxval = 10, group = GRP_MAIN, tooltip = "Number of past sessions to keep on chart.\nHigher = more history but more visual clutter.\nRecommended: 2-5")
+
+// ══════════════════════════════════════
+// INPUTS — KILLZONES
+// ══════════════════════════════════════
+showKzBoxesInput = input.bool(true, "Show Killzone Boxes", group = GRP_KZ, tooltip = "Display colored session boxes on chart")
+showKzTextInput  = input.bool(true, "Show Box Labels", group = GRP_KZ, tooltip = "Display session name inside killzone boxes")
+boxTranspInput   = input.int(80, "Box Transparency", minval = 50, maxval = 95, step = 5, group = GRP_KZ, tooltip = "Transparency of killzone box fill.\nHigher = more transparent.\nRecommended: 75-85")
+
+useAsiaInput    = input.bool(true, "", inline = "kz1", group = GRP_KZ)
+asiaNameInput   = input.string("Asia", "", inline = "kz1", group = GRP_KZ)
+asiaSessionInput = input.session("2000-0000", "", inline = "kz1", group = GRP_KZ)
+asiaColorInput  = input.color(#42A5F5, "", inline = "kz1", group = GRP_KZ)
+
+useLondonInput    = input.bool(true, "", inline = "kz2", group = GRP_KZ)
+londonNameInput   = input.string("London", "", inline = "kz2", group = GRP_KZ)
+londonSessionInput = input.session("0200-0500", "", inline = "kz2", group = GRP_KZ)
+londonColorInput  = input.color(#EF5350, "", inline = "kz2", group = GRP_KZ)
+
+useNyAmInput    = input.bool(true, "", inline = "kz3", group = GRP_KZ)
+nyAmNameInput   = input.string("NY AM", "", inline = "kz3", group = GRP_KZ)
+nyAmSessionInput = input.session("0930-1100", "", inline = "kz3", group = GRP_KZ)
+nyAmColorInput  = input.color(#26A69A, "", inline = "kz3", group = GRP_KZ)
+
+useNyLunchInput    = input.bool(true, "", inline = "kz4", group = GRP_KZ)
+nyLunchNameInput   = input.string("NY Lunch", "", inline = "kz4", group = GRP_KZ)
+nyLunchSessionInput = input.session("1200-1300", "", inline = "kz4", group = GRP_KZ)
+nyLunchColorInput  = input.color(#FFCA28, "", inline = "kz4", group = GRP_KZ)
+
+useNyPmInput    = input.bool(true, "", inline = "kz5", group = GRP_KZ)
+nyPmNameInput   = input.string("NY PM", "", inline = "kz5", group = GRP_KZ)
+nyPmSessionInput = input.session("1330-1600", "", inline = "kz5", group = GRP_KZ)
+nyPmColorInput  = input.color(#AB47BC, "", inline = "kz5", group = GRP_KZ)
+
+// ══════════════════════════════════════
+// INPUTS — PIVOTS
+// ══════════════════════════════════════
+showPivotsInput      = input.bool(true, "Show Session Pivots", group = GRP_PIVOTS, tooltip = "Extend high/low lines from each killzone until price sweeps them")
+showMidpointInput    = input.bool(false, "Show Midpoints", group = GRP_PIVOTS, tooltip = "Show the 50% level between session high and low")
+showSessionVwapInput = input.bool(false, "Show Session VWAP", group = GRP_PIVOTS, tooltip = "Show volume-weighted average price inside each killzone.\nMore accurate fair value than simple midpoint")
+showPivotLabelsInput = input.bool(true, "Show Pivot Labels", group = GRP_PIVOTS, tooltip = "Show text labels on pivot lines")
+showPivotPriceInput  = input.bool(false, "Show Price on Labels", group = GRP_PIVOTS, tooltip = "Append price value to pivot label text")
+pivotExtendInput = input.string("Until Swept", "Extend Pivots", options = ["Until Swept", "Always"], group = GRP_PIVOTS, tooltip = "Until Swept: line stops when price trades through it\nAlways: line extends indefinitely")
+pivotStyleInput  = input.string("Solid", "Pivot Line Style", options = ["Solid", "Dashed", "Dotted"], inline = "pvstyle", group = GRP_PIVOTS, tooltip = "Line style for session high/low pivots")
+pivotWidthInput  = input.int(1, "", minval = 1, maxval = 4, inline = "pvstyle", group = GRP_PIVOTS)
+midStyleInput    = input.string("Dotted", "Midpoint / VWAP Style", options = ["Solid", "Dashed", "Dotted"], inline = "mdstyle", group = GRP_PIVOTS, tooltip = "Line style for midpoint and VWAP lines")
+midWidthInput    = input.int(1, "", minval = 1, maxval = 3, inline = "mdstyle", group = GRP_PIVOTS)
+
+asiaHiLblInput = input.string("AS.H", "KZ1 Hi / Lo", inline = "lbl1", group = GRP_PIVOTS)
+asiaLoLblInput = input.string("AS.L", "", inline = "lbl1", group = GRP_PIVOTS)
+londonHiLblInput = input.string("LO.H", "KZ2 Hi / Lo", inline = "lbl2", group = GRP_PIVOTS)
+londonLoLblInput = input.string("LO.L", "", inline = "lbl2", group = GRP_PIVOTS)
+nyAmHiLblInput = input.string("AM.H", "KZ3 Hi / Lo", inline = "lbl3", group = GRP_PIVOTS)
+nyAmLoLblInput = input.string("AM.L", "", inline = "lbl3", group = GRP_PIVOTS)
+nyLunchHiLblInput = input.string("LN.H", "KZ4 Hi / Lo", inline = "lbl4", group = GRP_PIVOTS)
+nyLunchLoLblInput = input.string("LN.L", "", inline = "lbl4", group = GRP_PIVOTS)
+nyPmHiLblInput = input.string("PM.H", "KZ5 Hi / Lo", inline = "lbl5", group = GRP_PIVOTS)
+nyPmLoLblInput = input.string("PM.L", "", inline = "lbl5", group = GRP_PIVOTS)
+
+// ══════════════════════════════════════
+// INPUTS — SWEEP SIGNALS
+// ══════════════════════════════════════
+showSweepsInput    = input.bool(true, "Show Sweep Signals", group = GRP_SWEEP, tooltip = "Show Buy/Sell labels when price sweeps a killzone high/low and closes back inside.\nThis indicates liquidity grab — a key ICT concept")
+sweepSizeInput     = input.string("Small", "Signal Size", options = ["Small", "Normal"], group = GRP_SWEEP, tooltip = "Size of sweep signal labels on chart")
+minSweepAtrInput   = input.float(0.1, "Min Sweep Depth (ATR×)", minval = 0.0, maxval = 1.0, step = 0.05, group = GRP_SWEEP, tooltip = "Minimum wick beyond pivot as ATR multiple.\nHigher = fewer but stronger sweeps.\n0.0 = any touch counts.\nRecommended: 0.05–0.2")
+sweepCooldownInput = input.int(3, "Cooldown (bars)", minval = 0, maxval = 20, group = GRP_SWEEP, tooltip = "Minimum bars between sweep signals from the same session.\nPrevents rapid-fire signals.\n0 = no cooldown")
+sweepBodyFilterInput = input.bool(true, "Body Confirmation", group = GRP_SWEEP, tooltip = "Require close to be beyond the candle body midpoint.\nBullish sweep: close must be in upper half of candle body.\nBearish sweep: close must be in lower half.\nFilters out weak rejection wicks")
+
+// ══════════════════════════════════════
+// INPUTS — DWM
+// ══════════════════════════════════════
+showDOpenInput  = input.bool(false, "Daily Open", inline = "dwm_d", group = GRP_DWM, tooltip = "Show daily opening price line")
+showDHLInput    = input.bool(false, "D High/Low", inline = "dwm_d", group = GRP_DWM)
+showDSepInput   = input.bool(false, "D Sep", inline = "dwm_d", group = GRP_DWM)
+dColorInput     = input.color(#42A5F5, "", inline = "dwm_d", group = GRP_DWM)
+
+showWOpenInput  = input.bool(false, "Weekly Open", inline = "dwm_w", group = GRP_DWM, tooltip = "Show weekly opening price line")
+showWHLInput    = input.bool(false, "W High/Low", inline = "dwm_w", group = GRP_DWM)
+showWSepInput   = input.bool(false, "W Sep", inline = "dwm_w", group = GRP_DWM)
+wColorInput     = input.color(#26A69A, "", inline = "dwm_w", group = GRP_DWM)
+
+showMOpenInput  = input.bool(false, "Monthly Open", inline = "dwm_m", group = GRP_DWM, tooltip = "Show monthly opening price line")
+showMHLInput    = input.bool(false, "M High/Low", inline = "dwm_m", group = GRP_DWM)
+showMSepInput   = input.bool(false, "M Sep", inline = "dwm_m", group = GRP_DWM)
+mColorInput     = input.color(#EF5350, "", inline = "dwm_m", group = GRP_DWM)
+
+dwmStyleInput     = input.string("Solid", "DWM Line Style", options = ["Solid", "Dashed", "Dotted"], inline = "dwm_s", group = GRP_DWM)
+dwmWidthInput     = input.int(1, "", minval = 1, maxval = 3, inline = "dwm_s", group = GRP_DWM)
+dwmUnlimitedInput = input.bool(false, "Unlimited DWM Lines", group = GRP_DWM, tooltip = "Show as many DWM lines as possible.\nOtherwise limited by Session History setting")
+
+showDowInput     = input.bool(true, "Day-of-Week Labels", inline = "dow", group = GRP_DWM, tooltip = "Show day name on the chart")
+dowPositionInput = input.string("Bottom", "", options = ["Top", "Bottom"], inline = "dow", group = GRP_DWM)
+dowHideWkndInput = input.bool(true, "Hide Weekends", group = GRP_DWM)
+
+// ══════════════════════════════════════
+// INPUTS — OPENING PRICES
+// ══════════════════════════════════════
+useOpen1Input = input.bool(false, "", inline = "op1", group = GRP_OPENS)
+open1NameInput = input.string("True Day Open", "", inline = "op1", group = GRP_OPENS)
+open1SessionInput = input.session("0000-0001", "", inline = "op1", group = GRP_OPENS)
+open1ColorInput = input.color(#78909C, "", inline = "op1", group = GRP_OPENS)
+
+useOpen2Input = input.bool(false, "", inline = "op2", group = GRP_OPENS)
+open2NameInput = input.string("06:00", "", inline = "op2", group = GRP_OPENS)
+open2SessionInput = input.session("0600-0601", "", inline = "op2", group = GRP_OPENS)
+open2ColorInput = input.color(#78909C, "", inline = "op2", group = GRP_OPENS)
+
+useOpen3Input = input.bool(false, "", inline = "op3", group = GRP_OPENS)
+open3NameInput = input.string("10:00", "", inline = "op3", group = GRP_OPENS)
+open3SessionInput = input.session("1000-1001", "", inline = "op3", group = GRP_OPENS)
+open3ColorInput = input.color(#78909C, "", inline = "op3", group = GRP_OPENS)
+
+useOpen4Input = input.bool(false, "", inline = "op4", group = GRP_OPENS)
+open4NameInput = input.string("14:00", "", inline = "op4", group = GRP_OPENS)
+open4SessionInput = input.session("1400-1401", "", inline = "op4", group = GRP_OPENS)
+open4ColorInput = input.color(#78909C, "", inline = "op4", group = GRP_OPENS)
+
+openStyleInput     = input.string("Dotted", "Open Line Style", options = ["Solid", "Dashed", "Dotted"], inline = "ops", group = GRP_OPENS)
+openWidthInput     = input.int(1, "", minval = 1, maxval = 3, inline = "ops", group = GRP_OPENS)
+openUnlimitedInput = input.bool(false, "Unlimited", group = GRP_OPENS, tooltip = "Show as many open lines as possible")
+
+// ══════════════════════════════════════
+// INPUTS — TIMESTAMPS
+// ══════════════════════════════════════
+useTs1Input = input.bool(false, "", inline = "ts1", group = GRP_VERT)
+ts1SessionInput = input.session("0000-0001", "", inline = "ts1", group = GRP_VERT)
+ts1ColorInput = input.color(#78909C, "", inline = "ts1", group = GRP_VERT)
+
+useTs2Input = input.bool(false, "", inline = "ts2", group = GRP_VERT)
+ts2SessionInput = input.session("0800-0801", "", inline = "ts2", group = GRP_VERT)
+ts2ColorInput = input.color(#78909C, "", inline = "ts2", group = GRP_VERT)
+
+useTs3Input = input.bool(false, "", inline = "ts3", group = GRP_VERT)
+ts3SessionInput = input.session("1000-1001", "", inline = "ts3", group = GRP_VERT)
+ts3ColorInput = input.color(#78909C, "", inline = "ts3", group = GRP_VERT)
+
+useTs4Input = input.bool(false, "", inline = "ts4", group = GRP_VERT)
+ts4SessionInput = input.session("1200-1201", "", inline = "ts4", group = GRP_VERT)
+ts4ColorInput = input.color(#78909C, "", inline = "ts4", group = GRP_VERT)
+
+tsStyleInput     = input.string("Dotted", "Timestamp Style", options = ["Solid", "Dashed", "Dotted"], inline = "tss", group = GRP_VERT)
+tsWidthInput     = input.int(1, "", minval = 1, maxval = 3, inline = "tss", group = GRP_VERT)
+tsUnlimitedInput = input.bool(false, "Unlimited", group = GRP_VERT, tooltip = "Show as many timestamp lines as possible")
+
+// ══════════════════════════════════════
+// INPUTS — VISUAL & THEME
+// ══════════════════════════════════════
+themeInput = input.string("Auto", "Theme", options = ["Auto", "Dark", "Light"], group = GRP_VISUAL, tooltip = "Chart color theme.\n• Auto: detects from chart background\n• Dark: optimized for dark backgrounds\n• Light: optimized for light/white backgrounds")
+showWatermarkInput = input.bool(true, "Show Watermark", group = GRP_VISUAL, tooltip = "Display 'WillyAlgoTrader - by Willy' watermark on chart")
+
+// ══════════════════════════════════════
+// INPUTS — DASHBOARD
+// ══════════════════════════════════════
+showDashInput       = input.bool(true, "Show Dashboard", group = GRP_DASH, tooltip = "Show info panel with active session, bias, and sweep stats")
+dashPosInput        = input.string("Top Right", "Position", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = GRP_DASH, tooltip = "Dashboard position on chart")
+showRangeTableInput = input.bool(false, "Show Range Table", group = GRP_DASH, tooltip = "Show killzone range comparison table")
+rangeAvgLenInput    = input.int(5, "Range Avg Length", minval = 1, maxval = 20, group = GRP_DASH, tooltip = "Number of sessions to average for killzone range")
+rangePosInput       = input.string("Top Left", "Range Table Position", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right", "Middle Right"], group = GRP_DASH)
+
+// ══════════════════════════════════════
+// INPUTS — ALERTS
+// ══════════════════════════════════════
+enableAlertsInput = input.bool(true, "Enable Alerts", group = GRP_ALERT, tooltip = "Enable alert conditions for sweep signals and pivot breaks")
+webhookInput      = input.bool(false, "Webhook JSON Format", group = GRP_ALERT, tooltip = "Send alerts in JSON format for webhook integrations")
+
+// ══════════════════════════════════════
+// INPUTS — COLORS
+// ══════════════════════════════════════
+bullColorInput = input.color(#00E676, "Bull", inline = "sigcol", group = GRP_COLORS, tooltip = "Color for bullish sweep signals")
+bearColorInput = input.color(#FF5252, "Bear", inline = "sigcol", group = GRP_COLORS, tooltip = "Color for bearish sweep signals")
+
+// ══════════════════════════════════════
+// THEME DETECTION & PALETTE
+// ══════════════════════════════════════
+isDark = switch themeInput
+    "Dark"  => true
+    "Light" => false
+    => color.r(chart.bg_color) < 128
+
+TEXT_COLOR    = isDark ? #E0E0E0 : #1A1A1A
+TEXT_MUTED    = isDark ? color.new(#9E9E9E, 0) : color.new(#757575, 0)
+TEXT_BRIGHT   = isDark ? #FFFFFF : #000000
+TABLE_BG      = isDark ? color.new(#131722, 5) : color.new(#FFFFFF, 5)
+TABLE_BORDER  = isDark ? color.new(#2A2E39, 0) : color.new(#D0D0D0, 0)
+TABLE_ROW_ALT = isDark ? color.new(#1C2030, 0) : color.new(#F0F4F8, 0)
+HEADER_BG     = color.new(#2962FF, 0)
+HEADER_TEXT   = #FFFFFF
+LABEL_TEXT    = #FFFFFF
+LINE_SUBTLE   = isDark ? color.new(#555555, 0) : color.new(#AAAAAA, 0)
+WM_COLOR      = isDark ? color.new(#FFFFFF, 80) : color.new(#000000, 80)
+TRANSPARENT   = color.new(#000000, 100)
+
+// ══════════════════════════════════════
+// FUNCTIONS
+// ══════════════════════════════════════
+safeDiv(float num, float den, float fallback = 0.0) =>
+    den != 0 and not na(num) and not na(den) ? num / den : fallback
+
+getLineStyle(string s) =>
+    switch s
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        "Dotted" => line.style_dotted
+        => line.style_solid
+
+getDashPos(string s) =>
+    switch s
+        "Top Left"     => position.top_left
+        "Top Right"    => position.top_right
+        "Bottom Left"  => position.bottom_left
+        "Bottom Right" => position.bottom_right
+        "Middle Right" => position.middle_right
+        => position.top_right
+
+isInSession(string sess) =>
+    not na(time("", sess, timezoneInput))
+
+wasInSession(string sess) =>
+    not na(time("", sess, timezoneInput, bars_back = 1))
+
+// Sweep strength classifier: wick depth as % of ATR
+getSweepStrength(float wickDepth, float atr) =>
+    float ratio = atr > 0 ? wickDepth / atr : 0.0
+    string result = ratio >= 0.5 ? "Strong" : ratio >= 0.2 ? "Medium" : "Weak"
+    [result, ratio]
+
+// Timeframe gate
+var bool tfAllowed = timeframe.in_seconds("") < timeframe.in_seconds(tfLimitInput)
+
+// Resolved line styles (const at runtime)
+var pvStyle = getLineStyle(pivotStyleInput)
+var mdStyle = getLineStyle(midStyleInput)
+var dwStyle = getLineStyle(dwmStyleInput)
+var opStyle = getLineStyle(openStyleInput)
+var tsStyle = getLineStyle(tsStyleInput)
+
+// ATR for sweep threshold (protected from na)
+float atrVal = nz(ta.atr(14), 0.0)
+
+// Warmup
+bool isWarmedUp = bar_index >= WARMUP_BARS
+
+// Candle body midpoint for body confirmation filter
+float bodyMid = math.avg(open, close)
+
+// ══════════════════════════════════════
+// KILLZONE DATA STRUCTURES
+// ══════════════════════════════════════
+type SessionData
+    string name
+    string session
+    color  col
+    string hiLabel
+    string loLabel
+    // Visual objects
+    array<box>   boxes
+    array<line>  hiLines
+    array<line>  loLines
+    array<line>  midLines
+    array<line>  vwapLines
+    array<label> hiLabels
+    array<label> loLabels
+    array<bool>  hiValid
+    array<bool>  loValid
+    array<bool>  midValid
+    array<float> rangeStore
+    float rangeNow
+    // Session VWAP accumulators
+    float vwapNum
+    float vwapDen
+    // Sweep cooldown: bar_index of last sweep from this session
+    int lastSweepBar
+
+initSession(string nm, string sess, color c, string hiLbl, string loLbl) =>
+    SessionData.new(nm, sess, c, hiLbl, loLbl, array.new_box(), array.new_line(), array.new_line(), array.new_line(), array.new_line(), array.new_label(), array.new_label(), array.new_bool(), array.new_bool(), array.new_bool(), array.new_float(), 0.0, 0.0, 0.0, 0)
+
+var array<SessionData> sessions = array.new<SessionData>()
+if barstate.isfirst
+    if useAsiaInput
+        sessions.push(initSession(asiaNameInput, asiaSessionInput, asiaColorInput, asiaHiLblInput, asiaLoLblInput))
+    if useLondonInput
+        sessions.push(initSession(londonNameInput, londonSessionInput, londonColorInput, londonHiLblInput, londonLoLblInput))
+    if useNyAmInput
+        sessions.push(initSession(nyAmNameInput, nyAmSessionInput, nyAmColorInput, nyAmHiLblInput, nyAmLoLblInput))
+    if useNyLunchInput
+        sessions.push(initSession(nyLunchNameInput, nyLunchSessionInput, nyLunchColorInput, nyLunchHiLblInput, nyLunchLoLblInput))
+    if useNyPmInput
+        sessions.push(initSession(nyPmNameInput, nyPmSessionInput, nyPmColorInput, nyPmHiLblInput, nyPmLoLblInput))
+
+// ══════════════════════════════════════
+// OPENING PRICE DATA STRUCTURES
+// ══════════════════════════════════════
+type OpenLineData
+    string session
+    string name
+    color  col
+    array<line>  lines
+    array<label> labels
+    array<bool>  stopped
+
+initOpenLine(string sess, string nm, color c) =>
+    OpenLineData.new(sess, nm, c, array.new_line(), array.new_label(), array.new_bool())
+
+var array<OpenLineData> openLines = array.new<OpenLineData>()
+if barstate.isfirst
+    if useOpen1Input
+        openLines.push(initOpenLine(open1SessionInput, open1NameInput, open1ColorInput))
+    if useOpen2Input
+        openLines.push(initOpenLine(open2SessionInput, open2NameInput, open2ColorInput))
+    if useOpen3Input
+        openLines.push(initOpenLine(open3SessionInput, open3NameInput, open3ColorInput))
+    if useOpen4Input
+        openLines.push(initOpenLine(open4SessionInput, open4NameInput, open4ColorInput))
+
+// ══════════════════════════════════════
+// TIMESTAMP DATA STRUCTURES
+// ══════════════════════════════════════
+type TsLineData
+    string session
+    color  col
+    array<line> lines
+
+initTsLine(string sess, color c) =>
+    TsLineData.new(sess, c, array.new_line())
+
+var array<TsLineData> tsLines = array.new<TsLineData>()
+if barstate.isfirst
+    if useTs1Input
+        tsLines.push(initTsLine(ts1SessionInput, ts1ColorInput))
+    if useTs2Input
+        tsLines.push(initTsLine(ts2SessionInput, ts2ColorInput))
+    if useTs3Input
+        tsLines.push(initTsLine(ts3SessionInput, ts3ColorInput))
+    if useTs4Input
+        tsLines.push(initTsLine(ts4SessionInput, ts4ColorInput))
+
+// ══════════════════════════════════════
+// DWM STATE
+// ══════════════════════════════════════
+var float dOpen = na, var float dHigh = na, var float dLow = na
+var float dPrevHigh = na, var float dPrevLow = na
+var float wOpen = na, var float wHigh = na, var float wLow = na
+var float wPrevHigh = na, var float wPrevLow = na
+var float mOpen = na, var float mHigh = na, var float mLow = na
+var float mPrevHigh = na, var float mPrevLow = na
+
+var dOpenLines2 = array.new_line(), var dOpenLabels2 = array.new_label()
+var wOpenLines2 = array.new_line(), var wOpenLabels2 = array.new_label()
+var mOpenLines2 = array.new_line(), var mOpenLabels2 = array.new_label()
+var dHiLines2 = array.new_line(), var dLoLines2 = array.new_line()
+var dHiLabels2 = array.new_label(), var dLoLabels2 = array.new_label()
+var wHiLines2 = array.new_line(), var wLoLines2 = array.new_line()
+var wHiLabels2 = array.new_label(), var wLoLabels2 = array.new_label()
+var mHiLines2 = array.new_line(), var mLoLines2 = array.new_line()
+var mHiLabels2 = array.new_label(), var mLoLabels2 = array.new_label()
+var dSepLines2 = array.new_line(), var wSepLines2 = array.new_line(), var mSepLines2 = array.new_line()
+
+var bool dHLHitHi = false, var bool dHLHitLo = false
+var bool wHLHitHi = false, var bool wHLHitLo = false
+var bool mHLHitHi = false, var bool mHLHitLo = false
+
+// ══════════════════════════════════════
+// SWEEP TRACKING (NO var — reset each bar)
+// ══════════════════════════════════════
+var int sweepBullCount = 0
+var int sweepBearCount = 0
+var string lastSweepType = "—"
+var string lastSweepSession = "—"
+var string lastSweepStrength = "—"
+var float lastSweepScore = 0.0
+
+// Per-bar sweep flags — NOT var, recalculated each bar
+bool sweepBuyThisBar  = false
+bool sweepSellThisBar = false
+string sweepBuyReason  = ""
+string sweepSellReason = ""
+string sweepBuyStr     = ""
+string sweepSellStr    = ""
+float sweepBuyScore    = 0.0
+float sweepSellScore   = 0.0
+
+// Active session tracking — reset each bar, set inside loop
+string activeSessionName = "None"
+int activeSessionCount   = 0
+
+// ══════════════════════════════════════
+// CALCULATIONS — DWM DATA
+// ══════════════════════════════════════
+if showDOpenInput or showDHLInput
+    if timeframe.change("D")
+        dPrevHigh := dHigh
+        dPrevLow  := dLow
+        dOpen     := open
+        dHigh     := high
+        dLow      := low
+        dHLHitHi  := false
+        dHLHitLo  := false
+    else
+        dHigh := math.max(nz(dHigh, high), high)
+        dLow  := math.min(nz(dLow, low), low)
+
+if showWOpenInput or showWHLInput
+    if timeframe.change("W")
+        wPrevHigh := wHigh
+        wPrevLow  := wLow
+        wOpen     := open
+        wHigh     := high
+        wLow      := low
+        wHLHitHi  := false
+        wHLHitLo  := false
+    else
+        wHigh := math.max(nz(wHigh, high), high)
+        wLow  := math.min(nz(wLow, low), low)
+
+if showMOpenInput or showMHLInput
+    if timeframe.change("M")
+        mPrevHigh := mHigh
+        mPrevLow  := mLow
+        mOpen     := open
+        mHigh     := high
+        mLow      := low
+        mHLHitHi  := false
+        mHLHitLo  := false
+    else
+        mHigh := math.max(nz(mHigh, high), high)
+        mLow  := math.min(nz(mLow, low), low)
+
+// ══════════════════════════════════════
+// CORE LOGIC — KILLZONE PROCESSING
+// ══════════════════════════════════════
+if tfAllowed
+    for i = 0 to (sessions.size() > 0 ? sessions.size() - 1 : na)
+        SessionData sd = sessions.get(i)
+        bool inSess    = isInSession(sd.session)
+        bool wasInSess = wasInSession(sd.session)
+        bool sessStart = inSess and not wasInSess
+        bool sessEnd   = not inSess and wasInSess
+
+        // Track active sessions for dashboard
+        if inSess
+            activeSessionName := sd.name
+            activeSessionCount += 1
+
+        // ── SESSION START ──
+        if sessStart
+            color boxCol  = color.new(sd.col, boxTranspInput)
+            color textCol = color.new(sd.col, math.max(boxTranspInput - 30, 0))
+
+            if showKzBoxesInput
+                sd.boxes.unshift(box.new(time, high, time, low, xloc = xloc.bar_time, border_color = boxCol, bgcolor = boxCol, text = showKzTextInput ? sd.name : na, text_color = textCol, text_size = size.small, text_halign = text.align_left, text_valign = text.align_top))
+
+            if showPivotsInput
+                sd.hiLines.unshift(line.new(time, high, time, high, xloc = xloc.bar_time, style = pvStyle, color = sd.col, width = pivotWidthInput))
+                sd.loLines.unshift(line.new(time, low, time, low, xloc = xloc.bar_time, style = pvStyle, color = sd.col, width = pivotWidthInput))
+                sd.hiValid.unshift(true)
+                sd.loValid.unshift(true)
+
+                if showMidpointInput
+                    float initMid = math.avg(high, low)
+                    sd.midLines.unshift(line.new(time, initMid, time, initMid, xloc = xloc.bar_time, style = mdStyle, color = color.new(sd.col, 40), width = midWidthInput))
+                    sd.midValid.unshift(true)
+
+                if showSessionVwapInput
+                    sd.vwapLines.unshift(line.new(time, close, time, close, xloc = xloc.bar_time, style = mdStyle, color = color.new(sd.col, 20), width = midWidthInput))
+
+                if showPivotLabelsInput
+                    string hiTxt = showPivotPriceInput ? sd.hiLabel + " (" + str.tostring(high, format.mintick) + ")" : sd.hiLabel
+                    string loTxt = showPivotPriceInput ? sd.loLabel + " (" + str.tostring(low, format.mintick) + ")" : sd.loLabel
+                    sd.hiLabels.unshift(label.new(time, high, hiTxt, xloc = xloc.bar_time, color = TRANSPARENT, textcolor = TEXT_COLOR, style = label.style_label_left, size = size.small))
+                    sd.loLabels.unshift(label.new(time, low, loTxt, xloc = xloc.bar_time, color = TRANSPARENT, textcolor = TEXT_COLOR, style = label.style_label_left, size = size.small))
+
+            // Reset VWAP accumulators
+            float vol0 = nz(volume, 1.0)
+            sd.vwapNum := close * vol0
+            sd.vwapDen := vol0
+            sd.rangeNow := high - low
+
+            // Trim old objects
+            if sd.boxes.size() > maxSessionsInput
+                sd.boxes.pop().delete()
+            if sd.hiLines.size() > maxSessionsInput
+                sd.hiLines.pop().delete()
+                sd.loLines.pop().delete()
+                sd.hiValid.pop()
+                sd.loValid.pop()
+            if showMidpointInput and sd.midLines.size() > maxSessionsInput
+                sd.midLines.pop().delete()
+                sd.midValid.pop()
+            if showSessionVwapInput and sd.vwapLines.size() > maxSessionsInput
+                sd.vwapLines.pop().delete()
+            if sd.hiLabels.size() > maxSessionsInput
+                sd.hiLabels.pop().delete()
+                sd.loLabels.pop().delete()
+
+        // ── DURING SESSION ──
+        if inSess and sd.boxes.size() > 0
+            box b = sd.boxes.get(0)
+            b.set_right(time)
+            float newTop = math.max(b.get_top(), high)
+            float newBot = math.min(b.get_bottom(), low)
+            b.set_top(newTop)
+            b.set_bottom(newBot)
+            sd.rangeNow := newTop - newBot
+
+            // Accumulate session VWAP
+            float barVol = math.max(nz(volume, 0.0), 1.0)
+            sd.vwapNum += close * barVol
+            sd.vwapDen += barVol
+
+            if showPivotsInput and sd.hiLines.size() > 0
+                line hl = sd.hiLines.get(0)
+                line ll = sd.loLines.get(0)
+                hl.set_x2(time)
+                ll.set_x2(time)
+                if high > hl.get_y1()
+                    hl.set_xy1(time, high)
+                    hl.set_xy2(time, high)
+                if low < ll.get_y1()
+                    ll.set_xy1(time, low)
+                    ll.set_xy2(time, low)
+
+                // Update midpoint
+                if showMidpointInput and sd.midLines.size() > 0
+                    float mid = math.avg(hl.get_y2(), ll.get_y2())
+                    sd.midLines.get(0).set_xy1(time, mid)
+                    sd.midLines.get(0).set_xy2(time, mid)
+
+                // Update session VWAP line
+                if showSessionVwapInput and sd.vwapLines.size() > 0
+                    float vwapVal = safeDiv(sd.vwapNum, sd.vwapDen, close)
+                    sd.vwapLines.get(0).set_xy1(time, vwapVal)
+                    sd.vwapLines.get(0).set_xy2(time, vwapVal)
+
+                // Update labels
+                if showPivotLabelsInput and sd.hiLabels.size() > 0
+                    sd.hiLabels.get(0).set_x(time)
+                    sd.loLabels.get(0).set_x(time)
+                    if high > sd.hiLabels.get(0).get_y()
+                        sd.hiLabels.get(0).set_y(high)
+                        if showPivotPriceInput
+                            sd.hiLabels.get(0).set_text(sd.hiLabel + " (" + str.tostring(high, format.mintick) + ")")
+                    if low < sd.loLabels.get(0).get_y()
+                        sd.loLabels.get(0).set_y(low)
+                        if showPivotPriceInput
+                            sd.loLabels.get(0).set_text(sd.loLabel + " (" + str.tostring(low, format.mintick) + ")")
+
+        // ── SESSION END ──
+        if sessEnd
+            sd.rangeStore.unshift(sd.rangeNow)
+            if sd.rangeStore.size() > rangeAvgLenInput
+                sd.rangeStore.pop()
+
+        // ── OUTSIDE SESSION: extend pivots + detect sweeps ──
+        if not inSess and showPivotsInput and sd.hiLines.size() > 0
+            bool extendPast = pivotExtendInput == "Always"
+            line hl = sd.hiLines.get(0)
+            line ll = sd.loLines.get(0)
+            bool hiOk = sd.hiValid.get(0)
+            bool loOk = sd.loValid.get(0)
+
+            // Extend lines
+            if extendPast or hiOk
+                hl.set_x2(time)
+                if showPivotLabelsInput and sd.hiLabels.size() > 0
+                    sd.hiLabels.get(0).set_x(time)
+            if extendPast or loOk
+                ll.set_x2(time)
+                if showPivotLabelsInput and sd.loLabels.size() > 0
+                    sd.loLabels.get(0).set_x(time)
+
+            // Extend session VWAP outside session too
+            if showSessionVwapInput and sd.vwapLines.size() > 0
+                sd.vwapLines.get(0).set_x2(time)
+
+            // ── HIGH SWEEP: wick above + close below = bearish liquidity grab ──
+            float hiLevel = hl.get_y1()
+            if hiOk and high > hiLevel and barstate.isconfirmed
+                float wickDepth = high - hiLevel
+                bool depthOk = atrVal > 0 ? wickDepth >= atrVal * minSweepAtrInput : true
+                bool closeOk = close < hiLevel
+                bool bodyOk  = sweepBodyFilterInput ? close < bodyMid : true
+                bool coolOk  = (bar_index - sd.lastSweepBar) >= sweepCooldownInput
+                if depthOk and closeOk and bodyOk and coolOk and isWarmedUp
+                    sweepSellThisBar := true
+                    sweepSellReason  := sd.name + " High Sweep"
+                    [str1, sc1] = getSweepStrength(wickDepth, atrVal)
+                    sweepSellStr   := str1
+                    sweepSellScore := sc1
+                    lastSweepType     := "Bearish"
+                    lastSweepSession  := sd.name
+                    lastSweepStrength := str1
+                    lastSweepScore    := sc1
+                    sweepBearCount    += 1
+                    sd.lastSweepBar   := bar_index
+                // Invalidate only on confirmed close through level (not just wick touch)
+                if close > hiLevel
+                    sd.hiValid.set(0, false)
+
+            // ── LOW SWEEP: wick below + close above = bullish liquidity grab ──
+            float loLevel = ll.get_y1()
+            if loOk and low < loLevel and barstate.isconfirmed
+                float wickDepth2 = loLevel - low
+                bool depthOk2 = atrVal > 0 ? wickDepth2 >= atrVal * minSweepAtrInput : true
+                bool closeOk2 = close > loLevel
+                bool bodyOk2  = sweepBodyFilterInput ? close > bodyMid : true
+                bool coolOk2  = (bar_index - sd.lastSweepBar) >= sweepCooldownInput
+                if depthOk2 and closeOk2 and bodyOk2 and coolOk2 and isWarmedUp
+                    sweepBuyThisBar  := true
+                    sweepBuyReason   := sd.name + " Low Sweep"
+                    [str2, sc2] = getSweepStrength(wickDepth2, atrVal)
+                    sweepBuyStr    := str2
+                    sweepBuyScore  := sc2
+                    lastSweepType     := "Bullish"
+                    lastSweepSession  := sd.name
+                    lastSweepStrength := str2
+                    lastSweepScore    := sc2
+                    sweepBullCount    += 1
+                    sd.lastSweepBar   := bar_index
+                // Invalidate only if price closes decisively below
+                if close < loLevel
+                    sd.loValid.set(0, false)
+
+            // Midpoint extension + mitigation
+            if showMidpointInput and sd.midLines.size() > 0 and sd.midValid.size() > 0
+                if sd.midValid.get(0)
+                    sd.midLines.get(0).set_x2(time)
+                    float midLev = sd.midLines.get(0).get_y1()
+                    if low <= midLev and high >= midLev and barstate.isconfirmed
+                        sd.midValid.set(0, false)
+
+            // Extend older pivots in "Always" mode
+            if extendPast and sd.hiLines.size() > 1
+                for j = 1 to sd.hiLines.size() - 1
+                    sd.hiLines.get(j).set_x2(time)
+                    sd.loLines.get(j).set_x2(time)
+
+// Fix: if no sessions are active, reset to "None"
+if activeSessionCount == 0
+    activeSessionName := "None"
+
+// ══════════════════════════════════════
+// DWM PROCESSING
+// ══════════════════════════════════════
+trimDwm(array<line> lns, array<label> lbls, int mx) =>
+    if not dwmUnlimitedInput and lns.size() > mx
+        lns.pop().delete()
+        if lbls.size() > mx
+            lbls.pop().delete()
+
+trimSep(array<line> arr, int mx) =>
+    if not dwmUnlimitedInput and arr.size() > mx
+        arr.pop().delete()
+
+if tfAllowed
+    // Separators
+    if showDSepInput and timeframe.change("D")
+        dSepLines2.unshift(line.new(bar_index, high, bar_index, low, style = dwStyle, width = dwmWidthInput, extend = extend.both, color = dColorInput))
+        trimSep(dSepLines2, maxSessionsInput)
+    if showWSepInput and timeframe.change("W")
+        wSepLines2.unshift(line.new(bar_index, high, bar_index, low, style = dwStyle, width = dwmWidthInput, extend = extend.both, color = wColorInput))
+        trimSep(wSepLines2, maxSessionsInput)
+    if showMSepInput and timeframe.change("M")
+        mSepLines2.unshift(line.new(bar_index, high, bar_index, low, style = dwStyle, width = dwmWidthInput, extend = extend.both, color = mColorInput))
+        trimSep(mSepLines2, maxSessionsInput)
+
+    // Open lines
+    if showDOpenInput
+        if dOpenLines2.size() > 0
+            dOpenLines2.get(0).set_x2(time)
+            dOpenLabels2.get(0).set_x(time)
+        if timeframe.change("D")
+            dOpenLines2.unshift(line.new(time, nz(dOpen, open), time, nz(dOpen, open), xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = dColorInput))
+            dOpenLabels2.unshift(label.new(time, nz(dOpen, open), "D OPEN", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            trimDwm(dOpenLines2, dOpenLabels2, maxSessionsInput)
+    if showWOpenInput
+        if wOpenLines2.size() > 0
+            wOpenLines2.get(0).set_x2(time)
+            wOpenLabels2.get(0).set_x(time)
+        if timeframe.change("W")
+            wOpenLines2.unshift(line.new(time, nz(wOpen, open), time, nz(wOpen, open), xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = wColorInput))
+            wOpenLabels2.unshift(label.new(time, nz(wOpen, open), "W OPEN", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            trimDwm(wOpenLines2, wOpenLabels2, maxSessionsInput)
+    if showMOpenInput
+        if mOpenLines2.size() > 0
+            mOpenLines2.get(0).set_x2(time)
+            mOpenLabels2.get(0).set_x(time)
+        if timeframe.change("M")
+            mOpenLines2.unshift(line.new(time, nz(mOpen, open), time, nz(mOpen, open), xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = mColorInput))
+            mOpenLabels2.unshift(label.new(time, nz(mOpen, open), "M OPEN", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            trimDwm(mOpenLines2, mOpenLabels2, maxSessionsInput)
+
+    // DWM High/Low
+    if showDHLInput
+        if dHiLines2.size() > 0
+            dHiLines2.get(0).set_x2(time)
+            dLoLines2.get(0).set_x2(time)
+            dHiLabels2.get(0).set_x(time)
+            dLoLabels2.get(0).set_x(time)
+        if timeframe.change("D") and not na(dPrevHigh)
+            dHiLines2.unshift(line.new(time, dPrevHigh, time, dPrevHigh, xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = dColorInput))
+            dLoLines2.unshift(line.new(time, dPrevLow, time, dPrevLow, xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = dColorInput))
+            dHiLabels2.unshift(label.new(time, dPrevHigh, "PDH", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            dLoLabels2.unshift(label.new(time, dPrevLow, "PDL", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            trimDwm(dHiLines2, dHiLabels2, maxSessionsInput)
+            trimDwm(dLoLines2, dLoLabels2, maxSessionsInput)
+        if enableAlertsInput and dHiLines2.size() > 0 and barstate.isconfirmed
+            if not dHLHitHi and high > dHiLines2.get(0).get_y1()
+                dHLHitHi := true
+                alert("📈 PDH Break | " + syminfo.tickerid + " | " + timeframe.period, alert.freq_once_per_bar_close)
+            if not dHLHitLo and low < dLoLines2.get(0).get_y1()
+                dHLHitLo := true
+                alert("📉 PDL Break | " + syminfo.tickerid + " | " + timeframe.period, alert.freq_once_per_bar_close)
+
+    if showWHLInput
+        if wHiLines2.size() > 0
+            wHiLines2.get(0).set_x2(time)
+            wLoLines2.get(0).set_x2(time)
+            wHiLabels2.get(0).set_x(time)
+            wLoLabels2.get(0).set_x(time)
+        if timeframe.change("W") and not na(wPrevHigh)
+            wHiLines2.unshift(line.new(time, wPrevHigh, time, wPrevHigh, xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = wColorInput))
+            wLoLines2.unshift(line.new(time, wPrevLow, time, wPrevLow, xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = wColorInput))
+            wHiLabels2.unshift(label.new(time, wPrevHigh, "PWH", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            wLoLabels2.unshift(label.new(time, wPrevLow, "PWL", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            trimDwm(wHiLines2, wHiLabels2, maxSessionsInput)
+            trimDwm(wLoLines2, wLoLabels2, maxSessionsInput)
+        if enableAlertsInput and wHiLines2.size() > 0 and barstate.isconfirmed
+            if not wHLHitHi and high > wHiLines2.get(0).get_y1()
+                wHLHitHi := true
+                alert("📈 PWH Break | " + syminfo.tickerid + " | " + timeframe.period, alert.freq_once_per_bar_close)
+            if not wHLHitLo and low < wLoLines2.get(0).get_y1()
+                wHLHitLo := true
+                alert("📉 PWL Break | " + syminfo.tickerid + " | " + timeframe.period, alert.freq_once_per_bar_close)
+
+    if showMHLInput
+        if mHiLines2.size() > 0
+            mHiLines2.get(0).set_x2(time)
+            mLoLines2.get(0).set_x2(time)
+            mHiLabels2.get(0).set_x(time)
+            mLoLabels2.get(0).set_x(time)
+        if timeframe.change("M") and not na(mPrevHigh)
+            mHiLines2.unshift(line.new(time, mPrevHigh, time, mPrevHigh, xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = mColorInput))
+            mLoLines2.unshift(line.new(time, mPrevLow, time, mPrevLow, xloc = xloc.bar_time, style = dwStyle, width = dwmWidthInput, color = mColorInput))
+            mHiLabels2.unshift(label.new(time, mPrevHigh, "PMH", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            mLoLabels2.unshift(label.new(time, mPrevLow, "PML", xloc = xloc.bar_time, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            trimDwm(mHiLines2, mHiLabels2, maxSessionsInput)
+            trimDwm(mLoLines2, mLoLabels2, maxSessionsInput)
+        if enableAlertsInput and mHiLines2.size() > 0 and barstate.isconfirmed
+            if not mHLHitHi and high > mHiLines2.get(0).get_y1()
+                mHLHitHi := true
+                alert("📈 PMH Break | " + syminfo.tickerid + " | " + timeframe.period, alert.freq_once_per_bar_close)
+            if not mHLHitLo and low < mLoLines2.get(0).get_y1()
+                mHLHitLo := true
+                alert("📉 PML Break | " + syminfo.tickerid + " | " + timeframe.period, alert.freq_once_per_bar_close)
+
+// ══════════════════════════════════════
+// OPENING PRICES
+// ══════════════════════════════════════
+if tfAllowed
+    for k = 0 to (openLines.size() > 0 ? openLines.size() - 1 : na)
+        OpenLineData od = openLines.get(k)
+        bool inOpen    = isInSession(od.session)
+        bool wasInOpen = wasInSession(od.session)
+        if inOpen and not wasInOpen
+            od.lines.unshift(line.new(bar_index, open, bar_index, open, style = opStyle, width = openWidthInput, color = od.col))
+            od.labels.unshift(label.new(bar_index, open, od.name, style = label.style_label_left, color = TRANSPARENT, textcolor = TEXT_COLOR, size = size.small))
+            od.stopped.unshift(false)
+            if not openUnlimitedInput and od.lines.size() > maxSessionsInput
+                od.lines.pop().delete()
+                od.labels.pop().delete()
+                od.stopped.pop()
+        if not inOpen and od.lines.size() > 0 and not od.stopped.get(0)
+            od.lines.get(0).set_x2(bar_index)
+            od.labels.get(0).set_x(bar_index)
+
+// ══════════════════════════════════════
+// TIMESTAMPS
+// ══════════════════════════════════════
+if tfAllowed
+    for m = 0 to (tsLines.size() > 0 ? tsLines.size() - 1 : na)
+        TsLineData td = tsLines.get(m)
+        bool inTs    = isInSession(td.session)
+        bool wasInTs = wasInSession(td.session)
+        if inTs and not wasInTs
+            td.lines.unshift(line.new(bar_index, high, bar_index, low, style = tsStyle, width = tsWidthInput, extend = extend.both, color = td.col))
+            if not tsUnlimitedInput and td.lines.size() > maxSessionsInput
+                td.lines.pop().delete()
+
+// ══════════════════════════════════════
+// DAY OF WEEK LABELS
+// ══════════════════════════════════════
+var bool dowTop = dowPositionInput == "Top"
+bool newDay = dayofweek != dayofweek[1]
+
+plotchar(showDowInput and timeframe.isintraday and dayofweek == dayofweek.sunday    and newDay and not dowHideWkndInput, location = dowTop ? location.top : location.bottom, char = "", textcolor = TEXT_COLOR, text = "SUNDAY")
+plotchar(showDowInput and timeframe.isintraday and dayofweek == dayofweek.monday    and newDay, location = dowTop ? location.top : location.bottom, char = "", textcolor = TEXT_COLOR, text = "MONDAY")
+plotchar(showDowInput and timeframe.isintraday and dayofweek == dayofweek.tuesday   and newDay, location = dowTop ? location.top : location.bottom, char = "", textcolor = TEXT_COLOR, text = "TUESDAY")
+plotchar(showDowInput and timeframe.isintraday and dayofweek == dayofweek.wednesday and newDay, location = dowTop ? location.top : location.bottom, char = "", textcolor = TEXT_COLOR, text = "WEDNESDAY")
+plotchar(showDowInput and timeframe.isintraday and dayofweek == dayofweek.thursday  and newDay, location = dowTop ? location.top : location.bottom, char = "", textcolor = TEXT_COLOR, text = "THURSDAY")
+plotchar(showDowInput and timeframe.isintraday and dayofweek == dayofweek.friday    and newDay, location = dowTop ? location.top : location.bottom, char = "", textcolor = TEXT_COLOR, text = "FRIDAY")
+plotchar(showDowInput and timeframe.isintraday and dayofweek == dayofweek.saturday  and newDay and not dowHideWkndInput, location = dowTop ? location.top : location.bottom, char = "", textcolor = TEXT_COLOR, text = "SATURDAY")
+
+// ══════════════════════════════════════
+// SWEEP SIGNALS — CONFIRMED VISUAL
+// ══════════════════════════════════════
+bool confirmedBuy  = sweepBuyThisBar  and barstate.isconfirmed and isWarmedUp
+bool confirmedSell = sweepSellThisBar and barstate.isconfirmed and isWarmedUp
+
+if showSweepsInput and confirmedBuy
+    string tipBuy = "Sweep Buy | " + sweepBuyReason + "\nStrength: " + sweepBuyStr + " (" + str.tostring(sweepBuyScore, "#.##") + "×ATR)\nPrice: " + str.tostring(close, format.mintick)
+    label.new(bar_index, low, "▲", color = bullColorInput, textcolor = LABEL_TEXT, style = label.style_label_up, size = sweepSizeInput == "Normal" ? size.normal : size.small, tooltip = tipBuy)
+
+if showSweepsInput and confirmedSell
+    string tipSell = "Sweep Sell | " + sweepSellReason + "\nStrength: " + sweepSellStr + " (" + str.tostring(sweepSellScore, "#.##") + "×ATR)\nPrice: " + str.tostring(close, format.mintick)
+    label.new(bar_index, high, "▼", color = bearColorInput, textcolor = LABEL_TEXT, style = label.style_label_down, size = sweepSizeInput == "Normal" ? size.normal : size.small, tooltip = tipSell)
+
+// Label cleanup safety net
+if array.size(label.all) > 480
+    label.delete(array.shift(label.all))
+
+// ══════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════
+if showDashInput and barstate.islast
+    var dashTable = table.new(getDashPos(dashPosInput), 2, 9, TABLE_BG, TABLE_BORDER, 1, TABLE_BORDER, 1)
+
+    // Row 0: Header
+    table.cell(dashTable, 0, 0, "WillyAlgoTrader", text_color = HEADER_TEXT, bgcolor = HEADER_BG, text_size = size.small, text_halign = text.align_center)
+    table.merge_cells(dashTable, 0, 0, 1, 0)
+
+    // Row 1: Active Session
+    string sessDisplay = activeSessionCount > 1 ? activeSessionName + " +" + str.tostring(activeSessionCount - 1) : activeSessionName
+    table.cell(dashTable, 0, 1, "Session", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 1, sessDisplay, text_color = activeSessionName != "None" ? TEXT_BRIGHT : TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
+
+    // Row 2: Asian Bias
+    string asianBias = "—"
+    color biasColor  = TEXT_MUTED
+    if sessions.size() > 0
+        SessionData asiaData = sessions.get(0)
+        if asiaData.name == asiaNameInput and asiaData.hiLines.size() > 0 and asiaData.loLines.size() > 0
+            float asHi = asiaData.hiLines.get(0).get_y1()
+            float asLo = asiaData.loLines.get(0).get_y1()
+            if close > asHi
+                asianBias := "Bullish ▲"
+                biasColor := bullColorInput
+            else if close < asLo
+                asianBias := "Bearish ▼"
+                biasColor := bearColorInput
+            else
+                asianBias := "Neutral —"
+                biasColor := TEXT_MUTED
+    table.cell(dashTable, 0, 2, "Asia Bias", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 2, asianBias, text_color = biasColor, text_size = size.small, bgcolor = TABLE_ROW_ALT)
+
+    // Row 3: Last Sweep
+    color sweepCol = lastSweepType == "Bullish" ? bullColorInput : lastSweepType == "Bearish" ? bearColorInput : TEXT_MUTED
+    string sweepInfo = lastSweepType != "—" ? lastSweepType + " (" + lastSweepSession + ")" : "—"
+    table.cell(dashTable, 0, 3, "Last Sweep", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 3, sweepInfo, text_color = sweepCol, text_size = size.small, bgcolor = TABLE_BG)
+
+    // Row 4: Sweep Strength
+    color strColor = lastSweepStrength == "Strong" ? bullColorInput : lastSweepStrength == "Medium" ? #FFCA28 : TEXT_MUTED
+    string strDisplay = lastSweepStrength != "—" ? lastSweepStrength + " (" + str.tostring(lastSweepScore, "#.##") + "×)" : "—"
+    table.cell(dashTable, 0, 4, "Strength", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 4, strDisplay, text_color = strColor, text_size = size.small, bgcolor = TABLE_ROW_ALT)
+
+    // Row 5: Sweep Counts
+    string sweepCountStr = str.tostring(sweepBullCount) + " / " + str.tostring(sweepBearCount)
+    table.cell(dashTable, 0, 5, "Sweeps B/S", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 5, sweepCountStr, text_color = TEXT_COLOR, text_size = size.small, bgcolor = TABLE_BG)
+
+    // Row 6: Timeframe
+    table.cell(dashTable, 0, 6, "TF", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 6, timeframe.period, text_color = TEXT_COLOR, text_size = size.small, bgcolor = TABLE_ROW_ALT)
+
+    // Row 7: Symbol
+    table.cell(dashTable, 0, 7, "Symbol", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 7, syminfo.tickerid, text_color = TEXT_COLOR, text_size = size.small, bgcolor = TABLE_BG)
+
+    // Row 8: Version
+    table.cell(dashTable, 0, 8, "Version", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 8, INDICATOR_VERSION, text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+
+// ══════════════════════════════════════
+// RANGE TABLE
+// ══════════════════════════════════════
+var table rangeTable = na
+if showRangeTableInput and sessions.size() > 0
+    if barstate.isfirst
+        rangeTable := table.new(getDashPos(rangePosInput), 3, sessions.size() + 1, TABLE_BG, TABLE_BORDER, 1, TABLE_BORDER, 1)
+
+    if barstate.islast and not na(rangeTable)
+        table.cell(rangeTable, 0, 0, "Killzone", text_color = HEADER_TEXT, bgcolor = HEADER_BG, text_size = size.small)
+        table.cell(rangeTable, 1, 0, "Range", text_color = HEADER_TEXT, bgcolor = HEADER_BG, text_size = size.small)
+        table.cell(rangeTable, 2, 0, "Avg", text_color = HEADER_TEXT, bgcolor = HEADER_BG, text_size = size.small)
+        for r = 0 to sessions.size() - 1
+            SessionData sd = sessions.get(r)
+            color rowBg = r % 2 == 0 ? TABLE_BG : TABLE_ROW_ALT
+            table.cell(rangeTable, 0, r + 1, sd.name, text_color = sd.col, text_size = size.small, bgcolor = rowBg)
+            string rangeStr = sd.rangeNow > 0 ? str.tostring(sd.rangeNow, format.mintick) : "—"
+            table.cell(rangeTable, 1, r + 1, rangeStr, text_color = TEXT_COLOR, text_size = size.small, bgcolor = rowBg)
+            float avgRange = sd.rangeStore.size() > 0 ? sd.rangeStore.avg() : 0.0
+            string avgStr = avgRange > 0 ? str.tostring(avgRange, format.mintick) : "—"
+            table.cell(rangeTable, 2, r + 1, avgStr, text_color = TEXT_MUTED, text_size = size.small, bgcolor = rowBg)
+
+// ══════════════════════════════════════
+// WATERMARK — WillyAlgoTrader
+// ══════════════════════════════════════
+if barstate.islast and showWatermarkInput
+    var wmTable = table.new(position = position.bottom_center, columns = 1, rows = 1, bgcolor = TRANSPARENT, border_color = TRANSPARENT, border_width = 0, frame_color = TRANSPARENT, frame_width = 0)
+    table.cell(wmTable, 0, 0, "WillyAlgoTrader", text_color = WM_COLOR, text_size = size.normal, text_halign = text.align_center, bgcolor = TRANSPARENT)
+
+// ══════════════════════════════════════
+// ALERTS
+// ══════════════════════════════════════
+if enableAlertsInput and confirmedBuy
+    string priceStr = str.tostring(close, format.mintick)
+    string jsonBuy = '{"action":"buy","type":"sweep","ticker":"' + syminfo.tickerid + '","price":' + priceStr + ',"tf":"' + timeframe.period + '","strength":"' + sweepBuyStr + '","reason":"' + sweepBuyReason + '"}'
+    string textBuy = "🟢 SWEEP BUY | " + syminfo.tickerid + " | TF: " + timeframe.period + " | Price: " + priceStr + " | " + sweepBuyStr + " | " + sweepBuyReason
+    alert(webhookInput ? jsonBuy : textBuy, alert.freq_once_per_bar_close)
+
+if enableAlertsInput and confirmedSell
+    string priceStr2 = str.tostring(close, format.mintick)
+    string jsonSell = '{"action":"sell","type":"sweep","ticker":"' + syminfo.tickerid + '","price":' + priceStr2 + ',"tf":"' + timeframe.period + '","strength":"' + sweepSellStr + '","reason":"' + sweepSellReason + '"}'
+    string textSell = "🔴 SWEEP SELL | " + syminfo.tickerid + " | TF: " + timeframe.period + " | Price: " + priceStr2 + " | " + sweepSellStr + " | " + sweepSellReason
+    alert(webhookInput ? jsonSell : textSell, alert.freq_once_per_bar_close)

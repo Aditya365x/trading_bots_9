@@ -1,0 +1,29 @@
+# Breakout Pattern — converging channel breakout
+name: breakout_pattern
+strategy: breakout_pattern
+symbols: [BNBUSDT]    # unique coin -> no position clash on shared account
+timeframe: 5m
+market: futures
+
+leverage: 1
+risk_per_trade_pct: 1.0
+max_position_usdt: 0
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  pivot_len: 5
+  min_touches: 2
+  max_channel_bars: 120
+  convergence_min: 0.02
+  touch_tolerance: 0.15
+  deviation_max: 0.30
+  min_channel_width_atr: 0.5
+  vol_confirm: 1.2
+  momentum_filter: true
+  sl_padding_atr: 0.0
+  max_pivot_scan: 15

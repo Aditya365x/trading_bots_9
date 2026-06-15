@@ -1,0 +1,29 @@
+# ===== SECRETS — never commit =====
+.env
+.env.local
+*.key
+*.pem
+
+# ===== Python venv (D: drive, machine-specific) =====
+venvbots/
+venv/
+.venv/
+
+# ===== caches / bytecode =====
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# ===== runtime output =====
+logs/
+*.log
+trades.csv
+
+# ===== editor / OS =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

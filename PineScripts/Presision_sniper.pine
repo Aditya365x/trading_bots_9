@@ -1,0 +1,970 @@
+//@version=6
+// ══════════════════════════════════════════════════════════
+// PRECISION SNIPER [WillyAlgoTrader]
+// ══════════════════════════════════════════════════════════
+// Author:  Willy | WillyAlgoTrader
+// Version: 1.4.0
+
+indicator(
+    title            = "Precision Sniper [WillyAlgoTrader]",
+    shorttitle       = "PrecSniper",
+    overlay          = true,
+    max_labels_count = 500,
+    max_lines_count  = 500,
+    max_boxes_count  = 500,
+    max_bars_back    = 500)
+
+// ══════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════
+GRP_MAIN   = "⚙️ Main Settings"
+GRP_ENTRY  = "🎯 Entry Engine"
+GRP_RISK   = "🛡️ Risk Management"
+GRP_VISUAL = "🎨 Visual Settings"
+GRP_DASH   = "📊 Dashboard"
+GRP_ALERT  = "🔔 Alerts"
+GRP_COLORS = "🎨 Colors"
+
+INDICATOR_VERSION = "v1.4.0"
+
+// Grade thresholds as ratios of the actual max score.
+// On symbols with volume + intraday TF (max = 10) these equal the
+// absolute thresholds 8.0 / 6.5 / 5.0.
+GRADE_APLUS_R = 0.80   // A+ : score ≥ 80% of max
+GRADE_A_R     = 0.65   // A  : score ≥ 65% of max
+GRADE_B_R     = 0.50   // B  : score ≥ 50% of max
+
+// ══════════════════════════════════════
+// INPUTS — Main Settings
+// ══════════════════════════════════════
+sourceInput = input.source(close, "Source", group = GRP_MAIN, tooltip = "Price source for all calculations.\nDefault: close")
+
+htfInput = input.timeframe("", "HTF Trend Filter", group = GRP_MAIN, tooltip = "Higher timeframe for trend bias.\nLeave empty = current TF.\nRecommended: 1H for 5-15M, 4H for 1H, D for 4H")
+
+presetInput = input.string("Auto", "Preset", options = ["Auto", "Conservative", "Default", "Aggressive", "Scalping", "Swing", "Crypto 24/7", "Custom"], group = GRP_MAIN, tooltip = "Quick presets:\n• Auto: ≤5m Scalping, ≤1H Default, 1H–4H Conservative, 4H+ Swing\n• Conservative: fewer signals, higher reliability\n• Default: balanced\n• Aggressive: more signals, faster response\n• Scalping: optimized for 1-5min timeframes\n• Swing: optimized for 4H-D timeframes\n• Crypto 24/7: wider stops, no session bias\n• Custom: uses all manual settings below as-is")
+
+// ══════════════════════════════════════
+// INPUTS — Entry Engine
+// ══════════════════════════════════════
+emaFastLenInput = input.int(9, "EMA Fast Length", minval = 3, maxval = 50, group = GRP_ENTRY, tooltip = "Fast EMA for trend direction.\nOverridden by presets (except Custom).\nRecommended: 8-12")
+emaSlowLenInput = input.int(21, "EMA Slow Length", minval = 10, maxval = 100, group = GRP_ENTRY, tooltip = "Slow EMA for trend confirmation.\nOverridden by presets (except Custom).\nRecommended: 20-30")
+emaTrendLenInput = input.int(55, "EMA Trend Length", minval = 20, maxval = 200, group = GRP_ENTRY, tooltip = "Long EMA for macro trend filter.\nOverridden by presets (except Custom).\nRecommended: 50-100")
+
+minScoreInput = input.int(5, "Min Confluence Score", minval = 1, maxval = 10, group = GRP_ENTRY, tooltip = "Minimum confluence points to trigger signal.\nOverridden by presets (except Custom).\n• Max possible: 10\n\nNote: on symbols without volume data and on non-intraday TFs\nthe max score shrinks (volume/VWAP points excluded) and this\nthreshold is scaled down proportionally.")
+
+rsiLenInput = input.int(13, "RSI Length", minval = 5, maxval = 30, group = GRP_ENTRY, tooltip = "RSI period for momentum filter.\nOverridden by presets (except Custom).\nRecommended: 14")
+
+gradeFilterInput = input.string("All", "Signal Grade Filter", options = ["All", "A+ and A", "A+ Only"], group = GRP_ENTRY, tooltip = "Filter signals by quality grade:\n• All: show every valid signal (A+, A, B, and C if not hidden)\n• A+ and A: only high-quality signals (score ≥ 65% of max)\n• A+ Only: only premium signals (score ≥ 80% of max)\nUses the same grading as signal labels.\n\nNote: this filter is applied ON TOP of Min Confluence Score.\nIf your preset has a low min score (e.g. Aggressive = 3) but you select 'A+ Only',\nmany signals will be filtered out — that's expected.")
+
+hideCGradeInput = input.bool(true, "Hide C-Grade Signals", group = GRP_ENTRY, tooltip = "When enabled, signals with score < 50% of max (C grade) are filtered out.\n\nUseful when using 'All' grade filter with low-min-score presets\n(Aggressive/Scalping) where weak C-grade signals can leak through.\n\nHas no effect when Grade Filter is set to 'A+ and A' or 'A+ Only',\nsince those already require a higher score.")
+
+volFilterModeInput = input.string("Skip Signals", "High Volatility Filter", options = ["Off", "Skip Signals", "Widen SL"], group = GRP_ENTRY, tooltip = "How to handle NEW signals when the volatility regime is High\n(ATR significantly above its own average):\n• Off: ignore the regime (legacy v1.3.x behavior)\n• Skip Signals: block new entries while the regime is High\n• Widen SL: allow entries but multiply the ATR stop distance\n  by the widening factor below\n\nThe current regime is shown in the dashboard ('Volatility' row).\nDoes not affect trades that are already open.")
+
+volWidenFactorInput = input.float(1.5, "High-Vol SL Widening", minval = 1.0, maxval = 3.0, step = 0.1, group = GRP_ENTRY, tooltip = "SL distance multiplier applied on entry when\nHigh Volatility Filter = 'Widen SL' and the regime is High.\n\nTP levels scale with the widened risk automatically (R-based),\nso TP1/TP2/TP3 keep their Risk:Reward ratios.\nRecommended: 1.3-1.8")
+
+highVolThreshInput = input.float(1.3, "High Volatility Threshold", minval = 1.05, maxval = 3.0, step = 0.05, group = GRP_ENTRY, tooltip = "ATR / ATR-average ratio above which the regime is considered High.\nLower value = filter triggers more often.\nDefault: 1.3 (current ATR is 30% above its 42-bar average)")
+
+// ══════════════════════════════════════
+// INPUTS — Risk Management
+// ══════════════════════════════════════
+atrLenInput = input.int(14, "ATR Length", minval = 5, maxval = 50, group = GRP_RISK, tooltip = "ATR period for volatility measurement.\nOverridden by presets (except Custom).\nRecommended: 14")
+slMultInput = input.float(1.5, "SL ATR Multiplier", minval = 0.5, maxval = 5.0, step = 0.1, group = GRP_RISK, tooltip = "Stop Loss distance = ATR × this value.\n• Tight: 1.0-1.5\n• Default: 1.5\n• Wide: 2.0-3.0")
+
+tp1MultInput = input.float(1.0, "TP1 Risk:Reward", minval = 0.5, maxval = 5.0, step = 0.1, group = GRP_RISK, tooltip = "TP1 = Entry ± (SL distance × this).\nFirst partial profit target.\nRecommended: 1.0\n\nMust be < TP2 < TP3 (validated on load).")
+tp2MultInput = input.float(2.0, "TP2 Risk:Reward", minval = 1.0, maxval = 8.0, step = 0.1, group = GRP_RISK, tooltip = "TP2 = Entry ± (SL distance × this).\nSecond profit target.\nRecommended: 2.0")
+tp3MultInput = input.float(3.0, "TP3 Risk:Reward", minval = 1.5, maxval = 12.0, step = 0.5, group = GRP_RISK, tooltip = "TP3 = Entry ± (SL distance × this).\nFinal target / runner.\nRecommended: 3.0")
+
+useTrailInput = input.bool(true, "Enable Trailing Stop", group = GRP_RISK, tooltip = "After TP1 hit, trail SL to breakeven.\nAfter TP2 hit, trail SL to TP1 level.\nReduces drawdown on winning trades.")
+
+fullExitTP3Input = input.bool(true, "Full Exit at TP3", group = GRP_RISK, tooltip = "Close the entire trade when TP3 is reached.\nStatus shows 'TP3 ✓ — Closed' and the backtest records\nthe trade at full TP3 R immediately.\n\nDisable to keep the legacy runner behavior:\nafter TP3 the trade stays open and trails (v1.2.x behavior).")
+
+useStructureSLInput = input.bool(true, "Structure-Based SL", group = GRP_RISK, tooltip = "Place SL BEYOND the recent swing low/high — the wider of\nthe ATR stop vs the structure level — so the stop sits outside\nthe structure instead of inside it (stop-hunt protection).\n\nCapped at 1.5× the ATR stop distance so structure can't\npush the stop absurdly far.")
+swingLookbackInput = input.int(10, "Swing Lookback", minval = 3, maxval = 30, group = GRP_RISK, tooltip = "Bars to look back for swing high/low.\nUsed for structure-based SL.\nRecommended: 7-15")
+
+// ══════════════════════════════════════
+// INPUTS — Visual Settings
+// ══════════════════════════════════════
+themeInput = input.string("Auto", "Theme", options = ["Auto", "Dark", "Light"], group = GRP_VISUAL, tooltip = "Chart color theme.\n• Auto: detects from chart background\n• Dark: optimized for dark backgrounds\n• Light: optimized for light/white backgrounds")
+
+showSignalsInput   = input.bool(true,  "Show Buy/Sell Signals",  group = GRP_VISUAL, tooltip = "Display entry signal labels on chart")
+signalSizeInput    = input.string("Small", "Signal Label Size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = GRP_VISUAL, tooltip = "Size of the Long/Short signal labels.")
+showTPSLInput      = input.bool(true,  "Show TP/SL Lines",       group = GRP_VISUAL, tooltip = "Display take-profit and stop-loss levels")
+showRibbonInput    = input.bool(true,  "Show EMA Ribbon",        group = GRP_VISUAL, tooltip = "Display EMA fast/slow ribbon fill")
+showTrailInput     = input.bool(true,  "Show Trailing Stop",     group = GRP_VISUAL, tooltip = "Display trailing stop line when active.")
+showBgInput        = input.bool(false, "Show Background Color",  group = GRP_VISUAL, tooltip = "Tint background based on trend direction")
+showWatermarkInput = input.bool(true,  "Show Watermark",         group = GRP_VISUAL, tooltip = "Display 'WillyAlgoTrader - by Willy' watermark on chart")
+showGradeInput     = input.bool(true,  "Show Signal Grade",      group = GRP_VISUAL, tooltip = "Display quality grade (A+ / A / B) on signal labels")
+
+labelOffsetInput   = input.int(20, "Label Offset (bars)", minval = 5, maxval = 50, group = GRP_VISUAL, tooltip = "How far right of the last candle to place TP/SL labels.\nRecommended: 15-25")
+
+// ══════════════════════════════════════
+// INPUTS — Dashboard
+// ══════════════════════════════════════
+showDashInput    = input.bool(true, "Show Dashboard", group = GRP_DASH, tooltip = "Display information dashboard panel")
+showBtDashInput  = input.bool(true, "Show Backtest Stats", group = GRP_DASH, tooltip = "Display backtest performance tracker.\nShows win rate, avg R:R, total trades, profit factor.")
+dashPosStr       = input.string("Top Right", "Dashboard Position", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = GRP_DASH, tooltip = "Position of the dashboard on chart")
+
+// ══════════════════════════════════════
+// INPUTS — Alerts
+// ══════════════════════════════════════
+webhookInput = input.bool(false, "Webhook JSON Format", group = GRP_ALERT, tooltip = "Send alerts in JSON format for webhook integrations.\n\nApplies to the combined alert() calls only.\nThe individual alertcondition() alerts (Buy Signal / Sell Signal etc.)\nuse the message you type into the TradingView alert dialog.")
+
+// ══════════════════════════════════════
+// INPUTS — Colors
+// ══════════════════════════════════════
+bullColorInput    = input.color(#00E676, "Bull",    inline = "sig_colors", group = GRP_COLORS)
+bearColorInput    = input.color(#FF5252, "Bear",    inline = "sig_colors", group = GRP_COLORS)
+neutralColorInput = input.color(#FFEB3B, "Neutral", inline = "sig_colors", group = GRP_COLORS)
+
+// ══════════════════════════════════════
+// INPUT VALIDATION
+// ══════════════════════════════════════
+if tp1MultInput >= tp2MultInput or tp2MultInput >= tp3MultInput
+    runtime.error("Risk Management: TP multipliers must satisfy TP1 < TP2 < TP3.")
+
+if htfInput != "" and timeframe.in_seconds(htfInput) < timeframe.in_seconds()
+    runtime.error("HTF Trend Filter must be equal to or higher than the chart timeframe.")
+
+// ══════════════════════════════════════
+// AUTO-PRESET ENGINE
+// ══════════════════════════════════════
+// Determine effective preset: if "Auto", pick based on timeframe
+string resolvedPreset = presetInput
+
+if presetInput == "Auto"
+    float tfMinutes = timeframe.in_seconds() / 60.0
+    if tfMinutes <= 5
+        resolvedPreset := "Scalping"
+    else if tfMinutes <= 60
+        resolvedPreset := "Default"
+    else if tfMinutes < 240
+        resolvedPreset := "Conservative"
+    else
+        resolvedPreset := "Swing"
+
+// ── Full preset profiles ──
+// Each preset overrides: emaFast, emaSlow, emaTrend, rsiLen, atrLen, minScore, slMult.
+// "Custom" (and any unknown value) falls through to the manual input.
+
+int effectiveEmaFast = switch resolvedPreset
+    "Scalping"     => 5
+    "Aggressive"   => 8
+    "Default"      => 9
+    "Conservative" => 12
+    "Swing"        => 13
+    "Crypto 24/7"  => 9
+    => emaFastLenInput
+
+int effectiveEmaSlow = switch resolvedPreset
+    "Scalping"     => 13
+    "Aggressive"   => 18
+    "Default"      => 21
+    "Conservative" => 26
+    "Swing"        => 34
+    "Crypto 24/7"  => 21
+    => emaSlowLenInput
+
+int effectiveEmaTrend = switch resolvedPreset
+    "Scalping"     => 34
+    "Aggressive"   => 50
+    "Default"      => 55
+    "Conservative" => 89
+    "Swing"        => 89
+    "Crypto 24/7"  => 55
+    => emaTrendLenInput
+
+int effectiveRsiLen = switch resolvedPreset
+    "Scalping"     => 8
+    "Aggressive"   => 11
+    "Default"      => 13
+    "Conservative" => 14
+    "Swing"        => 21
+    "Crypto 24/7"  => 14
+    => rsiLenInput
+
+int effectiveAtrLen = switch resolvedPreset
+    "Scalping"     => 10
+    "Aggressive"   => 12
+    "Default"      => 14
+    "Conservative" => 14
+    "Swing"        => 20
+    "Crypto 24/7"  => 20
+    => atrLenInput
+
+int effectiveScore = switch resolvedPreset
+    "Scalping"     => 4
+    "Aggressive"   => 3
+    "Default"      => 5
+    "Conservative" => 7
+    "Swing"        => 6
+    "Crypto 24/7"  => 5
+    => minScoreInput
+
+float effectiveSL = switch resolvedPreset
+    "Scalping"     => 0.8
+    "Aggressive"   => 1.2
+    "Default"      => 1.5
+    "Conservative" => 2.0
+    "Swing"        => 2.5
+    "Crypto 24/7"  => 2.0
+    => slMultInput
+
+// ══════════════════════════════════════
+// THEME DETECTION & COLORS
+// ══════════════════════════════════════
+isDark = switch themeInput
+    "Dark"  => true
+    "Light" => false
+    => color.r(chart.bg_color) < 128
+
+TEXT_COLOR    = isDark ? #E0E0E0                  : #1A1A1A
+TEXT_MUTED    = isDark ? color.new(#9E9E9E, 0)    : color.new(#757575, 0)
+TEXT_BRIGHT   = isDark ? #FFFFFF                   : #000000
+TABLE_BG      = isDark ? color.new(#131722, 5)    : color.new(#FFFFFF, 5)
+TABLE_BORDER  = isDark ? color.new(#2A2E39, 0)    : color.new(#D0D0D0, 0)
+TABLE_ROW_ALT = isDark ? color.new(#1C2030, 0)    : color.new(#F0F4F8, 0)
+HEADER_BG     = color.new(#2962FF, 0)
+HEADER_TEXT   = #FFFFFF
+LABEL_TEXT    = #FFFFFF
+LINE_SUBTLE   = isDark ? color.new(#555555, 0)    : color.new(#AAAAAA, 0)
+WM_COLOR      = isDark ? color.new(#FFFFFF, 80)   : color.new(#000000, 80)
+BULL_BG       = color.new(bullColorInput, 88)
+BEAR_BG       = color.new(bearColorInput, 88)
+SL_COLOR      = color.new(#FF1744, 0)
+TP_COLOR      = color.new(#00E676, 0)
+TP_HIT_COLOR  = #40E0D0
+TRAIL_COLOR   = color.new(#FF9800, 0)
+ENTRY_COLOR   = color.new(#2979FF, 0)
+BT_HEADER_BG  = color.new(#6200EA, 0)
+
+// Dashboard text colors: readable on both dark and light backgrounds
+DASH_BULL    = isDark ? bullColorInput    : #00873E   // dark green instead of #00E676
+DASH_BEAR    = isDark ? bearColorInput    : #D32F2F   // dark red instead of #FF5252
+DASH_NEUTRAL = isDark ? neutralColorInput : #B8860B   // dark goldenrod instead of #FFEB3B
+
+// ══════════════════════════════════════
+// FUNCTIONS
+// ══════════════════════════════════════
+
+safeDiv(float num, float den, float fallback = 0.0) =>
+    den != 0 and not na(num) and not na(den) ? num / den : fallback
+
+safeStr(float val, string fmt = "#.##") =>
+    na(val) ? "—" : str.tostring(val, fmt)
+
+getDashPos(string pos) =>
+    switch pos
+        "Top Left"     => position.top_left
+        "Top Right"    => position.top_right
+        "Bottom Left"  => position.bottom_left
+        "Bottom Right" => position.bottom_right
+        => position.top_right
+
+getSignalSize(string sz) =>
+    switch sz
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+        => size.small
+
+// Grading is relative to the actual max score (adaptive scale)
+getGrade(float score, float maxS) =>
+    float r = maxS > 0 ? score / maxS : 0.0
+    r >= GRADE_APLUS_R ? "A+" : r >= GRADE_A_R ? "A" : r >= GRADE_B_R ? "B" : "C"
+
+passesGradeFilter(float score, float maxS) =>
+    float r = maxS > 0 ? score / maxS : 0.0
+    bool gradeOk = switch gradeFilterInput
+        "A+ Only"   => r >= GRADE_APLUS_R
+        "A+ and A"  => r >= GRADE_A_R
+        "All"       => true
+        => true
+    bool cOk = hideCGradeInput ? r >= GRADE_B_R : true
+    gradeOk and cOk
+
+// ══════════════════════════════════════
+// CALCULATIONS (using effective preset values)
+// ══════════════════════════════════════
+
+int WARMUP_BARS = math.max(effectiveEmaTrend, 50)
+bool isWarmedUp = bar_index >= WARMUP_BARS
+
+string sigSize = getSignalSize(signalSizeInput)
+
+// Core EMAs — using effective lengths
+float emaFast  = nz(ta.ema(sourceInput, effectiveEmaFast), close)
+float emaSlow  = nz(ta.ema(sourceInput, effectiveEmaSlow), close)
+float emaTrend = nz(ta.ema(sourceInput, effectiveEmaTrend), close)
+
+// ATR — using effective length
+float atrVal = nz(ta.atr(effectiveAtrLen), high - low)
+
+// RSI — using effective length
+float rsiVal = nz(ta.rsi(sourceInput, effectiveRsiLen), 50.0)
+
+// MACD
+[macdLine, signalLine, histLine] = ta.macd(sourceInput, 12, 26, 9)
+float macdHist     = nz(histLine, 0.0)
+float macdHistPrev = nz(macdHist[1], macdHist)
+
+// Volume — no free confluence point on symbols without volume data.
+// symHasVol latches once any bar shows volume, so the score scale is stable.
+var bool symHasVol = false
+if nz(volume, 0) > 0
+    symHasVol := true
+float volSma      = nz(ta.sma(nz(volume, 0), 20), 0.0)
+bool  volAboveAvg = symHasVol and nz(volume, 0) > volSma * 1.2
+
+// ADX
+[diPlus, diMinus, adxVal] = ta.dmi(14, 14)
+float safeAdx     = nz(adxVal, 0.0)
+float safeDiPlus  = nz(diPlus, 0.0)
+float safeDiMinus = nz(diMinus, 0.0)
+bool  strongTrend = safeAdx > 20
+
+// VWAP — the VWAP point only counts where VWAP is meaningful:
+// the symbol must have volume and the TF must be intraday (session VWAP
+// degenerates to per-bar hlc3 on D and above).
+float vwapVal = nz(ta.vwap(hlc3), close)
+bool vwapPointValid = symHasVol and timeframe.isintraday
+
+// Adaptive max score. Base factors = 8.0
+// (EMA cross 1 + trend 1 + RSI 1 + MACD hist 1 + MACD accel 1 + ADX 1 + HTF 1.5 + price>emaFast 0.5)
+// plus volume point (1.0) and VWAP point (1.0) when available.
+float maxScore = 8.0 + (symHasVol ? 1.0 : 0.0) + (vwapPointValid ? 1.0 : 0.0)
+
+// Min score threshold scaled to the actual scale (presets assume max = 10)
+float effectiveMinScore = effectiveScore * maxScore / 10.0
+
+// Volatility regime — now actively used by the entry filter (v1.4.0)
+float atrSmaGlobal = nz(ta.sma(atrVal, 42), atrVal)
+float volRatio     = safeDiv(atrVal, atrSmaGlobal, 1.0)
+string volRegime   = volRatio > highVolThreshInput ? "High" : volRatio < 0.7 ? "Low" : "Normal"
+bool   highVolNow  = volRegime == "High"
+
+// Entry gating / SL widening derived from the regime
+bool  volFilterOk = volFilterModeInput != "Skip Signals" or not highVolNow
+float slVolMult   = volFilterModeInput == "Widen SL" and highVolNow ? volWidenFactorInput : 1.0
+
+// ── HTF Trend Bias (non-repainting; single tuple security call) ──
+[htfEmaFast, htfEmaSlow] = request.security(syminfo.tickerid, htfInput, [ta.ema(sourceInput, effectiveEmaFast)[1], ta.ema(sourceInput, effectiveEmaSlow)[1]], barmerge.gaps_off, barmerge.lookahead_on)
+float safeHtfFast = nz(htfEmaFast, emaFast)
+float safeHtfSlow = nz(htfEmaSlow, emaSlow)
+int htfBias = safeHtfFast > safeHtfSlow ? 1 : safeHtfFast < safeHtfSlow ? -1 : 0
+
+// Swing levels (lookback bars + current bar, same window as the old loops)
+float recentSwingLow  = nz(ta.lowest(low, swingLookbackInput + 1), low)
+float recentSwingHigh = nz(ta.highest(high, swingLookbackInput + 1), high)
+
+// ══════════════════════════════════════
+// CONFLUENCE SCORING ENGINE
+// ══════════════════════════════════════
+// Note: hist>0 and hist-acceleration are two independent MACD factors
+// (the old "macd > signal" condition was identical to hist > 0).
+
+float bullScore = 0.0
+bullScore += emaFast > emaSlow                            ? 1.0 : 0.0
+bullScore += close > emaTrend                             ? 1.0 : 0.0
+bullScore += rsiVal > 50 and rsiVal < 75                  ? 1.0 : 0.0
+bullScore += macdHist > 0                                 ? 1.0 : 0.0
+bullScore += macdHist > macdHistPrev                      ? 1.0 : 0.0
+bullScore += vwapPointValid and close > vwapVal           ? 1.0 : 0.0
+bullScore += volAboveAvg                                  ? 1.0 : 0.0
+bullScore += strongTrend and safeDiPlus > safeDiMinus     ? 1.0 : 0.0
+bullScore += htfBias == 1                                 ? 1.5 : 0.0
+bullScore += close > emaFast                              ? 0.5 : 0.0
+
+float bearScore = 0.0
+bearScore += emaFast < emaSlow                            ? 1.0 : 0.0
+bearScore += close < emaTrend                             ? 1.0 : 0.0
+bearScore += rsiVal < 50 and rsiVal > 25                  ? 1.0 : 0.0
+bearScore += macdHist < 0                                 ? 1.0 : 0.0
+bearScore += macdHist < macdHistPrev                      ? 1.0 : 0.0
+bearScore += vwapPointValid and close < vwapVal           ? 1.0 : 0.0
+bearScore += volAboveAvg                                  ? 1.0 : 0.0
+bearScore += strongTrend and safeDiMinus > safeDiPlus     ? 1.0 : 0.0
+bearScore += htfBias == -1                                ? 1.5 : 0.0
+bearScore += close < emaFast                              ? 0.5 : 0.0
+
+// ══════════════════════════════════════
+// SIGNAL LOGIC
+// ══════════════════════════════════════
+// Note: emaBullCross and emaBearCross are mutually exclusive by definition,
+// so confirmedBuy and confirmedSell can never both be true on the same bar.
+
+bool emaBullCross = ta.crossover(emaFast, emaSlow)
+bool emaBearCross = ta.crossunder(emaFast, emaSlow)
+
+bool bullMomentum = close > emaFast and close > emaSlow
+bool bearMomentum = close < emaFast and close < emaSlow
+
+bool rsiNotOB = rsiVal < 75
+bool rsiNotOS = rsiVal > 25
+
+bool rawBuy  = emaBullCross and bullMomentum and rsiNotOB and volFilterOk and bullScore >= effectiveMinScore and passesGradeFilter(bullScore, maxScore)
+bool rawSell = emaBearCross and bearMomentum and rsiNotOS and volFilterOk and bearScore >= effectiveMinScore and passesGradeFilter(bearScore, maxScore)
+
+var int lastDirection = 0
+bool buyCondition  = rawBuy  and lastDirection != 1
+bool sellCondition = rawSell and lastDirection != -1
+
+bool confirmedBuy  = buyCondition  and barstate.isconfirmed and isWarmedUp
+bool confirmedSell = sellCondition and barstate.isconfirmed and isWarmedUp
+
+if confirmedBuy
+    lastDirection := 1
+else if confirmedSell
+    lastDirection := -1
+
+// ══════════════════════════════════════
+// TRADE MANAGEMENT (SL / TP / TRAIL)
+// ══════════════════════════════════════
+var float entryPrice  = na
+var float slPrice     = na
+var float tp1Price    = na
+var float tp2Price    = na
+var float tp3Price    = na
+var float trailPrice  = na
+var bool  tp1Hit      = false
+var bool  tp2Hit      = false
+var bool  tp3Hit      = false
+var bool  slHit       = false
+var int   tradeDir    = 0
+var float tradeRisk   = na
+var int   entryBar    = 0
+
+// True structure stop — take the WIDER of ATR vs structure so the SL sits
+// BEYOND the swing (outside the structure), not inside it.
+// Capped at 1.5× the ATR stop distance, floored at 0.5× ATR.
+calcSL(bool isLong, float entry, float atrSL) =>
+    float atrStop = isLong ? entry - atrSL : entry + atrSL
+    if useStructureSLInput
+        float structStop = isLong ? recentSwingLow - atrVal * 0.2 : recentSwingHigh + atrVal * 0.2
+        float finalStop  = isLong ? math.min(atrStop, structStop) : math.max(atrStop, structStop)
+        // Cap: structure can't push the stop further than 1.5× the ATR stop distance
+        float maxDist = atrSL * 1.5
+        float dist    = math.abs(entry - finalStop)
+        finalStop := dist > maxDist ? (isLong ? entry - maxDist : entry + maxDist) : finalStop
+        // Floor: keep a sane minimum distance
+        float minDist = atrVal * 0.5
+        dist := math.abs(entry - finalStop)
+        finalStop := dist < minDist ? (isLong ? entry - minDist : entry + minDist) : finalStop
+        finalStop
+    else
+        atrStop
+
+if confirmedBuy
+    entryPrice := close
+    tradeDir   := 1
+    float risk  = atrVal * effectiveSL * slVolMult
+    slPrice    := calcSL(true, close, risk)
+    tradeRisk  := math.abs(close - slPrice)
+    tp1Price   := close + tradeRisk * tp1MultInput
+    tp2Price   := close + tradeRisk * tp2MultInput
+    tp3Price   := close + tradeRisk * tp3MultInput
+    trailPrice := slPrice
+    tp1Hit     := false
+    tp2Hit     := false
+    tp3Hit     := false
+    slHit      := false
+    entryBar   := bar_index
+
+if confirmedSell
+    entryPrice := close
+    tradeDir   := -1
+    float risk  = atrVal * effectiveSL * slVolMult
+    slPrice    := calcSL(false, close, risk)
+    tradeRisk  := math.abs(close - slPrice)
+    tp1Price   := close - tradeRisk * tp1MultInput
+    tp2Price   := close - tradeRisk * tp2MultInput
+    tp3Price   := close - tradeRisk * tp3MultInput
+    trailPrice := slPrice
+    tp1Hit     := false
+    tp2Hit     := false
+    tp3Hit     := false
+    slHit      := false
+    entryBar   := bar_index
+
+// TP/SL detection
+// The SL check uses preTrail (the trail level BEFORE this bar's TP updates),
+// so a trail moved by a same-bar TP touch can't stop the trade out instantly.
+bool canCheckTPSL = bar_index > entryBar and tradeDir != 0 and not slHit
+
+if canCheckTPSL and tradeDir == 1
+    float preTrail = trailPrice
+    if high >= tp1Price and not tp1Hit
+        tp1Hit := true
+        if useTrailInput
+            trailPrice := entryPrice
+    if high >= tp2Price and not tp2Hit
+        tp2Hit := true
+        if useTrailInput
+            trailPrice := tp1Price
+    if high >= tp3Price and not tp3Hit
+        tp3Hit := true
+        if useTrailInput
+            trailPrice := tp2Price
+    if low <= nz(preTrail, slPrice)
+        slHit := true
+
+if canCheckTPSL and tradeDir == -1
+    float preTrail = trailPrice
+    if low <= tp1Price and not tp1Hit
+        tp1Hit := true
+        if useTrailInput
+            trailPrice := entryPrice
+    if low <= tp2Price and not tp2Hit
+        tp2Hit := true
+        if useTrailInput
+            trailPrice := tp1Price
+    if low <= tp3Price and not tp3Hit
+        tp3Hit := true
+        if useTrailInput
+            trailPrice := tp2Price
+    if high >= nz(preTrail, slPrice)
+        slHit := true
+
+// ── Event flags (computed once, while tradeDir still reflects the open trade;
+//    reused by status, lastDirection reset, backtest, alert() and alertcondition()) ──
+bool tp1Event = tp1Hit and not tp1Hit[1] and tradeDir != 0
+bool tp2Event = tp2Hit and not tp2Hit[1] and tradeDir != 0
+bool tp3Event = tp3Hit and not tp3Hit[1] and tradeDir != 0
+bool slEvent  = slHit  and not slHit[1]  and tradeDir != 0
+
+// Full exit at TP3 — if SL also triggered on the same bar, SL path wins
+bool tp3FullExitNow = tp3Event and fullExitTP3Input and not slHit
+
+// Trade status
+bool tradeActive = tradeDir != 0 and not slHit and not tp3FullExitNow
+string tradeStatus = "No Trade"
+if tp3FullExitNow
+    tradeStatus := "TP3 ✓ — Closed"
+else if tradeActive and tp3Hit
+    tradeStatus := "TP3 ✓ — Trail"
+else if tradeActive and tp2Hit
+    tradeStatus := "TP2 ✓ — Trail"
+else if tradeActive and tp1Hit
+    tradeStatus := "TP1 ✓ — Trail"
+else if tradeActive
+    tradeStatus := "Active"
+
+// Reset lastDirection when the trade closes by stop, so new signals in the
+// same direction aren't blocked after a stopped-out trade.
+if slEvent
+    lastDirection := 0
+
+// ══════════════════════════════════════
+// BACKTEST TRACKER
+// ══════════════════════════════════════
+// Tracks completed trades (trade closes when SL hit, TP3 full exit,
+// or a new opposing signal). A trade is a "win" if at least TP1 was
+// reached before SL.
+
+var int   btTotalTrades = 0
+var int   btWins        = 0   // TP1+ hit before SL
+var int   btLosses      = 0   // SL hit without TP1
+var float btTotalR      = 0.0 // sum of realized R multiples
+var float btGrossWin    = 0.0 // sum of positive R
+var float btGrossLoss   = 0.0 // sum of negative R (absolute)
+
+// Track previous trade state to detect closures
+var bool  prevTradeOpen = false
+var int   prevDir       = 0
+var bool  prevTP1       = false
+var bool  prevTP2       = false
+var bool  prevTP3       = false
+var bool  prevSL        = false
+
+// Detect trade closure: SL hit (trade ended), TP3 full exit,
+// or new signal in opposite direction
+bool tradeJustClosed = false
+float closedR = 0.0
+
+// Cases are mutually exclusive (else if). With trailing ON, SL after TP_N
+// means the trail was sitting at TP_{N-1}, so that's the realized R — not
+// the full TP_N.
+
+// Case 1: SL hit this bar (wasn't hit last bar)
+if slHit and not prevSL and prevTradeOpen
+    tradeJustClosed := true
+    if useTrailInput
+        // With trailing: SL after TP_N means exit at TP_{N-1}
+        if prevTP3 or tp3Hit
+            closedR := tp2MultInput   // trail was parked at TP2
+        else if prevTP2 or tp2Hit
+            closedR := tp1MultInput   // trail was parked at TP1
+        else if prevTP1 or tp1Hit
+            closedR := 0.0            // trail was parked at breakeven
+        else
+            closedR := -1.0           // pure SL loss
+    else
+        // Without trailing: best TP reached before original SL triggered
+        if prevTP3 or tp3Hit
+            closedR := tp3MultInput
+        else if prevTP2 or tp2Hit
+            closedR := tp2MultInput
+        else if prevTP1 or tp1Hit
+            closedR := tp1MultInput
+        else
+            closedR := -1.0
+
+// Case 2: new opposing signal closes previous trade (only if SL didn't already close it this bar)
+else if (confirmedBuy and prevDir == -1 and prevTradeOpen) or (confirmedSell and prevDir == 1 and prevTradeOpen)
+    tradeJustClosed := true
+    if prevTP3
+        closedR := tp3MultInput
+    else if prevTP2
+        closedR := tp2MultInput
+    else if prevTP1
+        closedR := tp1MultInput
+    else
+        // Estimate current P/L in R terms using the previous bar's entry/risk
+        // (var values from before confirmedBuy/Sell overwrote them this bar)
+        float prevEntry = nz(entryPrice[1], close)
+        float prevRisk  = nz(tradeRisk[1], atrVal)
+        float pnl = prevDir == 1 ? close - prevEntry : prevEntry - close
+        closedR := prevRisk != 0 ? pnl / prevRisk : 0.0
+
+// Case 3: full exit at TP3 — trade completes at the final target
+else if tp3FullExitNow and prevTradeOpen
+    tradeJustClosed := true
+    closedR := tp3MultInput
+
+// Record the closed trade
+if tradeJustClosed
+    btTotalTrades += 1
+    btTotalR      += closedR
+    if closedR > 0
+        btWins     += 1
+        btGrossWin += closedR
+    else if closedR < 0
+        btLosses    += 1
+        btGrossLoss += math.abs(closedR)
+    // closedR == 0 → breakeven, counted in total but neither W nor L
+
+// Flatten the position after a TP3 full exit and allow re-entry
+// in either direction (consistent with the post-SL reset)
+if tp3FullExitNow
+    tradeDir      := 0
+    lastDirection := 0
+
+// Update previous state
+prevTradeOpen := tradeActive
+prevDir       := tradeDir
+prevTP1       := tp1Hit
+prevTP2       := tp2Hit
+prevTP3       := tp3Hit
+prevSL        := slHit
+
+// Calculated stats
+float btWinRate      = btTotalTrades > 0 ? btWins * 1.0 / btTotalTrades * 100.0 : 0.0
+float btAvgR         = btTotalTrades > 0 ? btTotalR / (btTotalTrades * 1.0) : 0.0
+float btProfitFactor = btGrossLoss > 0   ? btGrossWin / btGrossLoss : (btGrossWin > 0 ? 999.0 : 0.0)
+
+// ══════════════════════════════════════
+// PLOTS — EMA Ribbon
+// ══════════════════════════════════════
+pFast = plot(showRibbonInput ? emaFast : na, "EMA Fast", color = color.new(bullColorInput, 30), linewidth = 2)
+pSlow = plot(showRibbonInput ? emaSlow : na, "EMA Slow", color = color.new(bearColorInput, 30), linewidth = 2)
+fill(pFast, pSlow, color = emaFast > emaSlow ? BULL_BG : BEAR_BG, title = "EMA Ribbon Fill")
+
+plot(showRibbonInput ? emaTrend : na, "EMA Trend", color = LINE_SUBTLE, linewidth = 1, style = plot.style_circles)
+
+bgcolor(showBgInput ? (emaFast > emaSlow and close > emaTrend ? color.new(bullColorInput, 94) : emaFast < emaSlow and close < emaTrend ? color.new(bearColorInput, 94) : na) : na, title = "Trend Background")
+
+// ══════════════════════════════════════
+// SIGNALS VISUAL — Long / Short labels with Grade
+// ══════════════════════════════════════
+if showSignalsInput and confirmedBuy
+    string gradeStr = showGradeInput ? " " + getGrade(bullScore, maxScore) : ""
+    label.new(bar_index, low, "Long" + gradeStr, color = bullColorInput, textcolor = LABEL_TEXT, style = label.style_label_up, size = sigSize, yloc = yloc.belowbar)
+
+if showSignalsInput and confirmedSell
+    string gradeStr = showGradeInput ? " " + getGrade(bearScore, maxScore) : ""
+    label.new(bar_index, high, "Short" + gradeStr, color = bearColorInput, textcolor = LABEL_TEXT, style = label.style_label_down, size = sigSize, yloc = yloc.abovebar)
+
+// ══════════════════════════════════════
+// TP/SL LINES & LABELS
+// ══════════════════════════════════════
+var line lineEntry = na, var line lineSL = na
+var line lineTP1 = na, var line lineTP2 = na, var line lineTP3 = na
+var line lineTrail = na
+var label lbEntry = na, var label lbSL = na
+var label lbTP1 = na, var label lbTP2 = na, var label lbTP3 = na
+var label lbTrail = na
+
+var bool hasDrawings = false
+
+// Marks a TP line/label pair as hit: recolor + solid + ✓ in the text
+markTPHit(line ln, label lb, string tpName, float tpPrice) =>
+    if not na(ln)
+        line.set_color(ln, color.new(TP_HIT_COLOR, 0))
+        line.set_style(ln, line.style_solid)
+    if not na(lb)
+        label.set_text(lb, tpName + " ✓ " + str.tostring(tpPrice, format.mintick))
+        label.set_color(lb, color.new(TP_HIT_COLOR, 40))
+
+if (confirmedBuy or confirmedSell) and showTPSLInput
+    line.delete(lineEntry), line.delete(lineSL)
+    line.delete(lineTP1), line.delete(lineTP2), line.delete(lineTP3)
+    line.delete(lineTrail)
+    label.delete(lbEntry), label.delete(lbSL)
+    label.delete(lbTP1), label.delete(lbTP2), label.delete(lbTP3)
+    label.delete(lbTrail)
+
+    int lineEnd  = bar_index + labelOffsetInput
+    int labelPos = bar_index + labelOffsetInput + 2
+
+    lineEntry := line.new(bar_index, entryPrice, lineEnd, entryPrice, color = ENTRY_COLOR, width = 2, style = line.style_solid)
+    lineSL    := line.new(bar_index, slPrice, lineEnd, slPrice, color = SL_COLOR, width = 2, style = line.style_solid)
+    lineTP1   := line.new(bar_index, tp1Price, lineEnd, tp1Price, color = TP_COLOR, width = 1, style = line.style_dashed)
+    lineTP2   := line.new(bar_index, tp2Price, lineEnd, tp2Price, color = TP_COLOR, width = 1, style = line.style_dashed)
+    lineTP3   := line.new(bar_index, tp3Price, lineEnd, tp3Price, color = TP_COLOR, width = 2, style = line.style_dashed)
+
+    if showTrailInput and useTrailInput
+        lineTrail := line.new(bar_index, trailPrice, lineEnd, trailPrice, color = TRAIL_COLOR, width = 1, style = line.style_dotted)
+        lbTrail   := label.new(labelPos + 10, trailPrice, "TRAIL " + str.tostring(trailPrice, format.mintick), color = color.new(TRAIL_COLOR, 60), textcolor = TEXT_BRIGHT, style = label.style_label_left, size = size.small)
+
+    lbEntry := label.new(labelPos, entryPrice, "ENTRY " + str.tostring(entryPrice, format.mintick), color = color.new(ENTRY_COLOR, 60), textcolor = TEXT_BRIGHT, style = label.style_label_left, size = size.small)
+    lbSL    := label.new(labelPos, slPrice, "SL " + str.tostring(slPrice, format.mintick), color = color.new(SL_COLOR, 60), textcolor = TEXT_BRIGHT, style = label.style_label_left, size = size.small)
+    lbTP1   := label.new(labelPos, tp1Price, "TP1 " + str.tostring(tp1Price, format.mintick), color = color.new(TP_COLOR, 60), textcolor = TEXT_BRIGHT, style = label.style_label_left, size = size.small)
+    lbTP2   := label.new(labelPos, tp2Price, "TP2 " + str.tostring(tp2Price, format.mintick), color = color.new(TP_COLOR, 60), textcolor = TEXT_BRIGHT, style = label.style_label_left, size = size.small)
+    lbTP3   := label.new(labelPos, tp3Price, "TP3 " + str.tostring(tp3Price, format.mintick), color = color.new(TP_COLOR, 60), textcolor = TEXT_BRIGHT, style = label.style_label_left, size = size.small)
+
+    hasDrawings := true
+
+if showTPSLInput and hasDrawings and not (confirmedBuy or confirmedSell)
+    int newLineEnd  = bar_index + labelOffsetInput
+    int newLabelPos = bar_index + labelOffsetInput + 2
+
+    if not na(lineEntry)
+        line.set_x2(lineEntry, newLineEnd)
+    if not na(lineSL)
+        line.set_x2(lineSL, newLineEnd)
+    if not na(lineTP1)
+        line.set_x2(lineTP1, newLineEnd)
+    if not na(lineTP2)
+        line.set_x2(lineTP2, newLineEnd)
+    if not na(lineTP3)
+        line.set_x2(lineTP3, newLineEnd)
+
+    if not na(lbEntry)
+        label.set_x(lbEntry, newLabelPos)
+    if not na(lbSL)
+        label.set_x(lbSL, newLabelPos)
+    if not na(lbTP1)
+        label.set_x(lbTP1, newLabelPos)
+    if not na(lbTP2)
+        label.set_x(lbTP2, newLabelPos)
+    if not na(lbTP3)
+        label.set_x(lbTP3, newLabelPos)
+
+    if showTrailInput and useTrailInput
+        if not na(lineTrail)
+            line.set_x2(lineTrail, newLineEnd)
+            line.set_y1(lineTrail, trailPrice)
+            line.set_y2(lineTrail, trailPrice)
+        if not na(lbTrail)
+            label.set_xy(lbTrail, newLabelPos + 10, trailPrice)
+            label.set_text(lbTrail, "TRAIL " + str.tostring(trailPrice, format.mintick))
+
+// Recolor each TP once, on its hit bar (drawings persist until the next signal)
+if showTPSLInput and tp1Event
+    markTPHit(lineTP1, lbTP1, "TP1", tp1Price)
+if showTPSLInput and tp2Event
+    markTPHit(lineTP2, lbTP2, "TP2", tp2Price)
+if showTPSLInput and tp3Event
+    markTPHit(lineTP3, lbTP3, "TP3", tp3Price)
+
+// ══════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════
+int dashRows = 12 + (showBtDashInput ? 7 : 0)
+
+var table dashTable = table.new(getDashPos(dashPosStr), 2, dashRows, TABLE_BG, TABLE_BORDER, 1, TABLE_BORDER, 1)
+
+// Renders one key/value dashboard row, returns the next row index
+dashRow(int rowIdx, string key, string val, color valCol, color bg) =>
+    table.cell(dashTable, 0, rowIdx, key, text_color = TEXT_MUTED, text_size = size.small, bgcolor = bg)
+    table.cell(dashTable, 1, rowIdx, val, text_color = valCol, text_size = size.small, bgcolor = bg)
+    rowIdx + 1
+
+// Renders a merged section header row, returns the next row index
+dashHeader(int rowIdx, string txt, color bg) =>
+    table.cell(dashTable, 0, rowIdx, txt, text_color = HEADER_TEXT, bgcolor = bg, text_size = size.small, text_halign = text.align_center)
+    table.merge_cells(dashTable, 0, rowIdx, 1, rowIdx)
+    rowIdx + 1
+
+if showDashInput and barstate.islast
+    int row = dashHeader(0, "WillyAlgoTrader", HEADER_BG)
+
+    // Trend
+    string trendStr = emaFast > emaSlow and close > emaTrend ? "Bullish" : emaFast < emaSlow and close < emaTrend ? "Bearish" : "Neutral"
+    color trendCol = trendStr == "Bullish" ? DASH_BULL : trendStr == "Bearish" ? DASH_BEAR : DASH_NEUTRAL
+    row := dashRow(row, "Trend", trendStr, trendCol, TABLE_BG)
+
+    // Score — shown against the actual (adaptive) max score
+    float activeScore = tradeDir == 1 ? bullScore : tradeDir == -1 ? bearScore : math.max(bullScore, bearScore)
+    float scoreRatio = maxScore > 0 ? activeScore / maxScore : 0.0
+    color scoreCol = scoreRatio >= 0.7 ? DASH_BULL : scoreRatio >= 0.5 ? DASH_NEUTRAL : DASH_BEAR
+    row := dashRow(row, "Score", safeStr(activeScore, "#.#") + " / " + str.tostring(maxScore, "#"), scoreCol, TABLE_ROW_ALT)
+
+    // Status
+    color statusCol = tradeStatus == "No Trade" ? TEXT_MUTED : str.contains(tradeStatus, "TP") ? DASH_BULL : DASH_NEUTRAL
+    row := dashRow(row, "Status", tradeStatus, statusCol, TABLE_BG)
+
+    // HTF Bias
+    string htfStr = htfBias == 1 ? "Bullish" : htfBias == -1 ? "Bearish" : "Neutral"
+    color htfCol = htfBias == 1 ? DASH_BULL : htfBias == -1 ? DASH_BEAR : DASH_NEUTRAL
+    row := dashRow(row, "HTF Bias", htfStr, htfCol, TABLE_ROW_ALT)
+
+    // Volatility — marks the filter when it is active right now
+    string volDisplay = volRegime + (highVolNow and volFilterModeInput == "Skip Signals" ? " ⛔" : highVolNow and volFilterModeInput == "Widen SL" ? " ⚠" : "")
+    color volCol = volRegime == "High" ? DASH_BEAR : volRegime == "Low" ? TEXT_MUTED : DASH_BULL
+    row := dashRow(row, "Volatility", volDisplay, volCol, TABLE_BG)
+
+    // RSI
+    color rsiCol = rsiVal > 70 ? DASH_BEAR : rsiVal < 30 ? DASH_BULL : TEXT_COLOR
+    row := dashRow(row, "RSI", safeStr(rsiVal, "#.0"), rsiCol, TABLE_ROW_ALT)
+
+    // ADX
+    string adxStr = safeStr(safeAdx, "#.0") + (strongTrend ? " ✓" : "")
+    row := dashRow(row, "ADX", adxStr, strongTrend ? DASH_BULL : TEXT_MUTED, TABLE_BG)
+
+    // TF
+    row := dashRow(row, "Timeframe", timeframe.period, TEXT_COLOR, TABLE_ROW_ALT)
+
+    // Preset (show resolved preset if Auto)
+    string presetDisplay = presetInput == "Auto" ? "Auto → " + resolvedPreset : resolvedPreset
+    row := dashRow(row, "Preset", presetDisplay, TEXT_COLOR, TABLE_BG)
+
+    // Grade Filter
+    color gfCol = gradeFilterInput == "A+ Only" ? DASH_BULL : gradeFilterInput == "A+ and A" ? DASH_NEUTRAL : TEXT_COLOR
+    row := dashRow(row, "Grade Filter", gradeFilterInput, gfCol, TABLE_ROW_ALT)
+
+    // Version
+    row := dashRow(row, "Version", INDICATOR_VERSION, TEXT_MUTED, TABLE_BG)
+
+    // ── Backtest Stats Section ──
+    if showBtDashInput
+        row := dashHeader(row, "📈 Backtest", BT_HEADER_BG)
+
+        // Total trades
+        string tradesStr = str.tostring(btTotalTrades) + " (" + str.tostring(btWins) + "W / " + str.tostring(btLosses) + "L)"
+        row := dashRow(row, "Trades", tradesStr, TEXT_COLOR, TABLE_BG)
+
+        // Win rate
+        color wrCol = btWinRate >= 55 ? DASH_BULL : btWinRate >= 45 ? DASH_NEUTRAL : DASH_BEAR
+        row := dashRow(row, "Win Rate", safeStr(btWinRate, "#.0") + "%", btTotalTrades > 0 ? wrCol : TEXT_MUTED, TABLE_ROW_ALT)
+
+        // Average R
+        color avgRCol = btAvgR > 0.5 ? DASH_BULL : btAvgR > 0 ? DASH_NEUTRAL : DASH_BEAR
+        row := dashRow(row, "Avg R", safeStr(btAvgR, "#.##") + "R", btTotalTrades > 0 ? avgRCol : TEXT_MUTED, TABLE_BG)
+
+        // Profit Factor
+        string pfStr = btProfitFactor >= 999 ? "∞" : safeStr(btProfitFactor, "#.##")
+        color pfCol = btProfitFactor >= 1.5 ? DASH_BULL : btProfitFactor >= 1.0 ? DASH_NEUTRAL : DASH_BEAR
+        row := dashRow(row, "Profit Factor", pfStr, btTotalTrades > 0 ? pfCol : TEXT_MUTED, TABLE_ROW_ALT)
+
+        // Total R
+        color totRCol = btTotalR > 0 ? DASH_BULL : btTotalR < 0 ? DASH_BEAR : TEXT_MUTED
+        row := dashRow(row, "Total R", safeStr(btTotalR, "#.##") + "R", btTotalTrades > 0 ? totRCol : TEXT_MUTED, TABLE_BG)
+
+// ══════════════════════════════════════
+// WATERMARK
+// ══════════════════════════════════════
+var table wmTable = table.new(position.bottom_center, 1, 1, color.new(color.black, 100), color.new(color.black, 100), 0, color.new(color.black, 100), 0)
+
+if barstate.islast and showWatermarkInput
+    table.cell(wmTable, 0, 0, "WillyAlgoTrader", text_color = WM_COLOR, text_size = size.normal, text_halign = text.align_center, bgcolor = color.new(color.black, 100))
+
+// ══════════════════════════════════════
+// ALERTS
+// ══════════════════════════════════════
+string tickerStr = syminfo.tickerid
+string tfStr     = timeframe.period
+
+// Builds the entry-signal alert message (JSON or text — same format as before)
+buildSignalMsg(string action, string labelTxt, float score) =>
+    string priceStr = str.tostring(close, format.mintick)
+    string slStr    = str.tostring(nz(slPrice, 0.0), format.mintick)
+    string tp1Str   = str.tostring(nz(tp1Price, 0.0), format.mintick)
+    string tp2Str   = str.tostring(nz(tp2Price, 0.0), format.mintick)
+    string tp3Str   = str.tostring(nz(tp3Price, 0.0), format.mintick)
+    string scoreStr = str.tostring(nz(score, 0.0), "#.#")
+    string gradeStr = getGrade(score, maxScore)
+    string jsonMsg = '{"action":"' + action + '","ticker":"' + tickerStr + '","price":' + priceStr + ',"sl":' + slStr + ',"tp1":' + tp1Str + ',"tp2":' + tp2Str + ',"tp3":' + tp3Str + ',"score":' + scoreStr + ',"grade":"' + gradeStr + '","preset":"' + resolvedPreset + '","vol":"' + volRegime + '","tf":"' + tfStr + '"}'
+    string textMsg = labelTxt + " " + gradeStr + " | " + tickerStr + " | TF: " + tfStr + " | Price: " + priceStr + " | SL: " + slStr + " | TP1: " + tp1Str + " | TP2: " + tp2Str + " | TP3: " + tp3Str + " | Score: " + scoreStr + " | Vol: " + volRegime
+    webhookInput ? jsonMsg : textMsg
+
+// Builds a TP/SL event alert message (JSON or text — same format as before)
+buildEventMsg(string eventId, string labelTxt) =>
+    string priceStr = str.tostring(close, format.mintick)
+    string jsonMsg = '{"event":"' + eventId + '","ticker":"' + tickerStr + '","price":' + priceStr + '}'
+    string textMsg = labelTxt + " | " + tickerStr + " | Price: " + priceStr
+    webhookInput ? jsonMsg : textMsg
+
+if confirmedBuy
+    alert(buildSignalMsg("buy", "🟢 BUY", bullScore), alert.freq_once_per_bar_close)
+
+if confirmedSell
+    alert(buildSignalMsg("sell", "🔴 SELL", bearScore), alert.freq_once_per_bar_close)
+
+if tp1Event
+    alert(buildEventMsg("tp1_hit", "🎯 TP1 HIT"), alert.freq_once_per_bar_close)
+
+if tp2Event
+    alert(buildEventMsg("tp2_hit", "🎯 TP2 HIT"), alert.freq_once_per_bar_close)
+
+if tp3Event
+    alert(buildEventMsg("tp3_hit", "🏆 TP3 HIT"), alert.freq_once_per_bar_close)
+
+if slEvent
+    alert(buildEventMsg("sl_hit", "🛑 SL HIT"), alert.freq_once_per_bar_close)
+
+// ══════════════════════════════════════
+// ALERTS — Individual alertcondition() per direction
+// ══════════════════════════════════════
+// These appear as separate options in TradingView's "Create Alert" dialog
+// under the "Condition" dropdown, so users can subscribe to just BUY,
+// just SELL, or any individual TP/SL event.
+//
+// Tip: in the alert dialog you can also use placeholders inside the message:
+// {{ticker}}, {{close}}, {{interval}}, {{plot_0}} ... etc.
+
+// ── All valid signals (uses your in-script Grade Filter / Hide C-Grade) ──
+alertcondition(confirmedBuy,  title = "🟢 Buy Signal",  message = "🟢 BUY signal on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+alertcondition(confirmedSell, title = "🔴 Sell Signal", message = "🔴 SELL signal on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+
+// ── Grade-filtered variants ──
+// These IGNORE the in-script Grade Filter input and apply their own threshold,
+// so you can subscribe to a stricter level than the chart is currently set to.
+// Thresholds are relative to the adaptive max score (same as labels).
+bool buyAPlus      = confirmedBuy  and bullScore >= GRADE_APLUS_R * maxScore
+bool sellAPlus     = confirmedSell and bearScore >= GRADE_APLUS_R * maxScore
+bool buyAOrBetter  = confirmedBuy  and bullScore >= GRADE_A_R * maxScore
+bool sellAOrBetter = confirmedSell and bearScore >= GRADE_A_R * maxScore
+bool buyBOrBetter  = confirmedBuy  and bullScore >= GRADE_B_R * maxScore
+bool sellBOrBetter = confirmedSell and bearScore >= GRADE_B_R * maxScore
+
+alertcondition(buyAPlus,       title = "🟢 Buy Signal (A+ only)",       message = "🟢 BUY A+ on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+alertcondition(sellAPlus,      title = "🔴 Sell Signal (A+ only)",      message = "🔴 SELL A+ on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+alertcondition(buyAOrBetter,   title = "🟢 Buy Signal (A+ and A)",      message = "🟢 BUY A+/A on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+alertcondition(sellAOrBetter,  title = "🔴 Sell Signal (A+ and A)",     message = "🔴 SELL A+/A on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+alertcondition(buyBOrBetter,   title = "🟢 Buy Signal (A+ and A and B)",  message = "🟢 BUY A+/A/B on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+alertcondition(sellBOrBetter,  title = "🔴 Sell Signal (A+ and A and B)", message = "🔴 SELL A+/A/B on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+
+// ── TP/SL events as individual conditions (reuse the event flags) ──
+alertcondition(tp1Event, title = "🎯 TP1 Hit", message = "🎯 TP1 HIT on {{ticker}} | Price: {{close}}")
+alertcondition(tp2Event, title = "🎯 TP2 Hit", message = "🎯 TP2 HIT on {{ticker}} | Price: {{close}}")
+alertcondition(tp3Event, title = "🏆 TP3 Hit", message = "🏆 TP3 HIT on {{ticker}} | Price: {{close}}")
+alertcondition(slEvent,  title = "🛑 SL Hit",  message = "🛑 SL HIT on {{ticker}} | Price: {{close}}")
+
+// ── Combined "any signal" condition (kept for convenience) ──
+alertcondition(confirmedBuy or confirmedSell, title = "⚡ Any Signal (Buy or Sell)", message = "⚡ Signal on {{ticker}} | TF: {{interval}} | Price: {{close}}")
+
+// ══════════════════════════════════════
+// END
+// ══════════════════════════════════════

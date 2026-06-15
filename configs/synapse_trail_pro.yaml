@@ -1,0 +1,26 @@
+# Synapse Trail Pro — ratcheting EMA/ATR trail + regime/quality
+name: synapse_trail_pro
+strategy: synapse_trail_pro
+symbols: [SOLUSDT]    # unique coin -> no position clash on shared account
+timeframe: 5m
+market: futures
+
+leverage: 1
+risk_per_trade_pct: 1.0
+max_position_usdt: 0
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  atr_len: 13
+  base_mult: 1.618
+  trail_len: 21
+  adaptive_mult: false
+  ratchet: true
+  min_quality: 0           # 0 = take all; 55 = B+; 75 = A only
+  skip_choppy: false
+  risk_preset: "Balanced"  # Conservative | Balanced | Aggressive | Scalping | Custom

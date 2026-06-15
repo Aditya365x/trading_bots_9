@@ -1,0 +1,29 @@
+# Fibonacci Structure Engine — CHoCH / sweep / engulf combo
+name: fib_structure_engine
+strategy: fib_structure_engine
+symbols: [TRXUSDT]    # unique coin -> no position clash on shared account
+timeframe: 5m
+market: futures
+
+leverage: 1
+risk_per_trade_pct: 1.0
+max_position_usdt: 0
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  swing_len: 10
+  atr_filter: true
+  atr_mult: 0.5
+  cooldown: 5
+  eq_tolerance: 0.1
+  confluence_tolerance: 0.3
+  strict_engulf: true
+  sl_mult: 1.5
+  tp1: 1.0
+  tp2: 2.0
+  tp3: 3.0

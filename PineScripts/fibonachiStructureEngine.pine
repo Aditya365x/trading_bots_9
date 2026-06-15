@@ -1,0 +1,924 @@
+//@version=6
+// ══════════════════════════════════════════════════════════
+// FIBONACCI STRUCTURE ENGINE [WillyAlgoTrader]
+// ══════════════════════════════════════════════════════════
+// Author:  Willy | WillyAlgoTrader
+// Version: 1.5.2
+
+
+indicator(
+    title            = "Fibonacci Structure Engine [WillyAlgoTrader]",
+    shorttitle       = "FibStruct",
+    overlay          = true,
+    max_labels_count = 500,
+    max_lines_count  = 500,
+    max_boxes_count  = 500,
+    max_bars_back    = 5000)
+
+// ══════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════
+GRP_MAIN    = "⚙️ Main Settings"
+GRP_FIB     = "📐 Fibonacci Levels"
+GRP_STRUCT  = "🏗️ Structure"
+GRP_LIQ     = "💧 Liquidity"
+GRP_VISUAL  = "🎨 Visual Settings"
+GRP_DASH    = "📊 Dashboard"
+GRP_ALERT   = "🔔 Alerts"
+GRP_COLORS  = "🎨 Colors"
+
+INDICATOR_VERSION = "v1.5.2"
+
+// ══════════════════════════════════════
+// INPUTS — Main Settings
+// ══════════════════════════════════════
+swingLenInput = input.int(10, "Swing Detection Length", minval = 3, maxval = 50, step = 1, group = GRP_MAIN, tooltip = "Lookback for pivot detection.\n• Higher = larger swings, fewer structures\n• Lower = more granular swings, more noise\n• Recommended: 8–20")
+atrFilterInput = input.bool(true, "ATR Swing Filter", group = GRP_MAIN, tooltip = "Filter out minor swings smaller than ATR threshold.\nReduces noise on volatile instruments")
+atrMultInput = input.float(0.5, "ATR Filter Multiplier", minval = 0.1, maxval = 3.0, step = 0.1, group = GRP_MAIN, tooltip = "Minimum swing size as multiple of ATR.\n• Higher = only large swings qualify\n• Lower = more swings detected\n• Recommended: 0.3–1.0")
+cooldownInput = input.int(5, "Signal Cooldown (bars)", minval = 1, maxval = 50, step = 1, group = GRP_MAIN, tooltip = "Minimum bars between consecutive BUY or SELL signals.\nPrevents signal clustering on choppy price action.\n• Higher = fewer signals, less noise\n• Recommended: 3–10")
+
+// ══════════════════════════════════════
+// INPUTS — Fibonacci Levels
+// ══════════════════════════════════════
+showFibInput = input.bool(true, "Show Fibonacci Levels", group = GRP_FIB, tooltip = "Display Fibonacci retracement levels from the last confirmed structure")
+fibExtendInput = input.int(20, "Fib Extension Bars", minval = 5, maxval = 100, step = 5, group = GRP_FIB, tooltip = "How many bars to extend Fibonacci lines to the right")
+
+showFib236Input = input.bool(false, "0.236", inline = "fib1", group = GRP_FIB)
+showFib382Input = input.bool(true, "0.382", inline = "fib1", group = GRP_FIB)
+showFib500Input = input.bool(true, "0.500", inline = "fib1", group = GRP_FIB)
+showFib618Input = input.bool(true, "0.618", inline = "fib2", group = GRP_FIB)
+showFib786Input = input.bool(true, "0.786", inline = "fib2", group = GRP_FIB)
+showFibTargetInput = input.bool(true, "Target (-0.618)", inline = "fib3", group = GRP_FIB)
+showFibTgt50Input = input.bool(true, "-0.5", inline = "fib3", group = GRP_FIB)
+
+confluenceTolInput = input.float(0.3, "Confluence ATR Tolerance", minval = 0.05, maxval = 1.0, step = 0.05, group = GRP_FIB, tooltip = "Max distance (in ATR) between price and Fib level to count as confluence.\n• Lower = stricter requirement\n• Recommended: 0.2–0.5")
+
+// ══════════════════════════════════════
+// INPUTS — Structure
+// ══════════════════════════════════════
+showStructInput = input.bool(true, "Show BOS / CHoCH", group = GRP_STRUCT, tooltip = "Show Break of Structure (BOS) and Change of Character (CHoCH) labels and lines")
+showSwingsInput = input.bool(true, "Show Swing Labels", group = GRP_STRUCT, tooltip = "Show HH/HL/LH/LL swing point labels on confirmed pivots")
+showEngulfInput = input.bool(true, "Show Engulfing Signals", group = GRP_STRUCT, tooltip = "Show bullish/bearish engulfing patterns filtered by structure context")
+strictEngulfInput = input.bool(true, "Strict Engulfing", group = GRP_STRUCT, tooltip = "Strict (classic): current body must STRICTLY exceed previous body on both sides.\nLoose: allows equality on one side — produces more signals but lower quality.\n• ON  = fewer, higher-quality patterns (recommended)\n• OFF = more patterns, matches pre-v1.5.1 behavior")
+
+// ══════════════════════════════════════
+// INPUTS — Liquidity (EQH/EQL + Sweeps)
+// ══════════════════════════════════════
+showEqLevelsInput = input.bool(true, "Show EQH / EQL", group = GRP_LIQ, tooltip = "Detect and draw Equal Highs / Equal Lows — resting liquidity zones")
+eqTolInput = input.float(0.1, "EQ ATR Tolerance", minval = 0.01, maxval = 0.5, step = 0.01, group = GRP_LIQ, tooltip = "Max distance (in ATR) between two swings to count as equal.\n• Lower = stricter\n• Recommended: 0.05–0.2")
+eqExtendBarsInput = input.int(50, "EQ Line Extension (bars)", minval = 5, maxval = 500, step = 5, group = GRP_LIQ, tooltip = "How many bars to extend EQH/EQL lines to the right.\nLine auto-trims at sweep bar when liquidity is taken.")
+showSweepsInput = input.bool(true, "Show Liquidity Sweeps", group = GRP_LIQ, tooltip = "Detect wick-through + close-back-inside patterns at swing highs/lows or EQH/EQL")
+sweepAddsConfInput = input.bool(true, "Sweeps Boost Confluence", group = GRP_LIQ, tooltip = "Add weight to confluence score when a liquidity sweep occurs")
+
+// ══════════════════════════════════════
+// INPUTS — Visual
+// ══════════════════════════════════════
+themeInput = input.string("Auto", "Theme", options = ["Auto", "Dark", "Light"], group = GRP_VISUAL, tooltip = "Chart color theme.\n• Auto: detects from chart background\n• Dark: optimized for dark backgrounds\n• Light: optimized for light/white backgrounds")
+showSignalsInput = input.bool(false, "Show Buy/Sell Signals", group = GRP_VISUAL, tooltip = "Show confirmed entry signals based on structure + Fibonacci confluence")
+showWatermarkInput = input.bool(true, "Show Watermark", group = GRP_VISUAL, tooltip = "Display 'WillyAlgoTrader' watermark on chart")
+structLineStyleInput = input.string("Dashed", "Structure Line Style", options = ["Solid", "Dashed", "Dotted"], group = GRP_VISUAL, tooltip = "Line style for BOS/CHoCH break lines")
+structLineWidthInput = input.int(2, "Structure Line Width", minval = 1, maxval = 4, step = 1, group = GRP_VISUAL, tooltip = "Thickness of structure break lines")
+
+// ══════════════════════════════════════
+// INPUTS — Dashboard
+// ══════════════════════════════════════
+showDashInput = input.bool(true, "Show Dashboard", group = GRP_DASH, tooltip = "Show info panel with trend, signal, and confluence data")
+dashPosStr = input.string("Top Right", "Position", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = GRP_DASH, tooltip = "Dashboard position on chart")
+
+// ══════════════════════════════════════
+// INPUTS — Alerts
+// ══════════════════════════════════════
+webhookInput = input.bool(false, "Webhook JSON Format", group = GRP_ALERT, tooltip = "Send alerts in JSON format for webhook integrations (3Commas, custom bots, etc.)")
+
+// ══════════════════════════════════════
+// INPUTS — Colors
+// ══════════════════════════════════════
+bullColorInput = input.color(#00E676, "Bull", inline = "colors", group = GRP_COLORS)
+bearColorInput = input.color(#FF5252, "Bear", inline = "colors", group = GRP_COLORS)
+fibColorInput = input.color(#42A5F5, "Fib Lines", inline = "colors2", group = GRP_COLORS)
+confluenceColorInput = input.color(#FFD600, "Confluence", inline = "colors2", group = GRP_COLORS)
+eqColorInput = input.color(#B388FF, "EQH/EQL", inline = "colors3", group = GRP_COLORS)
+sweepColorInput = input.color(#FF9100, "Sweep", inline = "colors3", group = GRP_COLORS)
+
+// ══════════════════════════════════════
+// THEME DETECTION & COLORS
+// ══════════════════════════════════════
+isDark = switch themeInput
+    "Dark"  => true
+    "Light" => false
+    => color.r(chart.bg_color) < 128
+
+TEXT_COLOR    = isDark ? #E0E0E0 : #1A1A1A
+TEXT_MUTED    = isDark ? color.new(#9E9E9E, 0) : color.new(#757575, 0)
+TABLE_BG     = isDark ? color.new(#131722, 5) : color.new(#FFFFFF, 5)
+TABLE_BORDER = isDark ? color.new(#2A2E39, 0) : color.new(#D0D0D0, 0)
+TABLE_ROW_ALT = isDark ? color.new(#1C2030, 0) : color.new(#F0F4F8, 0)
+HEADER_BG    = color.new(#2962FF, 0)
+LABEL_TEXT   = #FFFFFF
+WM_COLOR     = isDark ? color.new(#FFFFFF, 80) : color.new(#000000, 80)
+
+// ══════════════════════════════════════
+// FUNCTIONS
+// ══════════════════════════════════════
+
+getLineStyle(string s) =>
+    switch s
+        "Solid"  => line.style_solid
+        "Dotted" => line.style_dotted
+        => line.style_dashed
+
+getDashPos(string s) =>
+    switch s
+        "Top Left"     => position.top_left
+        "Top Right"    => position.top_right
+        "Bottom Left"  => position.bottom_left
+        "Bottom Right" => position.bottom_right
+        => position.top_right
+
+fibLevel(float swH, float swL, float ratio) =>
+    swH - (swH - swL) * ratio
+
+// ══════════════════════════════════════
+// CORE CALCULATIONS
+// ══════════════════════════════════════
+
+float atrValue = nz(ta.atr(14), 0.0)
+
+int WARMUP_BARS = math.max(swingLenInput * 3, 50)
+bool isWarmedUp = bar_index >= WARMUP_BARS
+
+// ── Pivot Detection (ATR-filtered) ──
+float pivotHigh = ta.pivothigh(high, swingLenInput, swingLenInput)
+float pivotLow  = ta.pivotlow(low, swingLenInput, swingLenInput)
+
+var float swHigh1 = na
+var float swHigh2 = na
+var int   swHigh1Idx = na
+var int   swHigh2Idx = na
+
+var float swLow1 = na
+var float swLow2 = na
+var int   swLow1Idx = na
+var int   swLow2Idx = na
+
+bool newSwingHigh = false
+bool newSwingLow  = false
+
+float atrMinSize = atrFilterInput ? atrValue * atrMultInput : 0.0
+
+if not na(pivotHigh)
+    bool passFilter = na(swLow1) or (pivotHigh - swLow1) >= atrMinSize
+    if passFilter
+        swHigh2 := swHigh1
+        swHigh2Idx := swHigh1Idx
+        swHigh1 := pivotHigh
+        swHigh1Idx := bar_index - swingLenInput
+        newSwingHigh := true
+
+if not na(pivotLow)
+    bool passFilter = na(swHigh1) or (swHigh1 - pivotLow) >= atrMinSize
+    if passFilter
+        swLow2 := swLow1
+        swLow2Idx := swLow1Idx
+        swLow1 := pivotLow
+        swLow1Idx := bar_index - swingLenInput
+        newSwingLow := true
+
+// ── Swing Labels ──
+if newSwingHigh and not na(swHigh2) and isWarmedUp and showSwingsInput
+    string swLbl = swHigh1 > swHigh2 ? "HH" : "LH"
+    color swClr = swHigh1 > swHigh2 ? bullColorInput : bearColorInput
+    label.new(swHigh1Idx, swHigh1, swLbl, color = color.new(swClr, 100), textcolor = swClr, style = label.style_label_down, size = size.tiny, tooltip = swLbl + ": " + str.tostring(swHigh1, format.mintick))
+
+if newSwingLow and not na(swLow2) and isWarmedUp and showSwingsInput
+    string swLbl = swLow1 > swLow2 ? "HL" : "LL"
+    color swClr = swLow1 > swLow2 ? bullColorInput : bearColorInput
+    label.new(swLow1Idx, swLow1, swLbl, color = color.new(swClr, 100), textcolor = swClr, style = label.style_label_up, size = size.tiny, tooltip = swLbl + ": " + str.tostring(swLow1, format.mintick))
+
+// ══════════════════════════════════════
+// EQH / EQL DETECTION
+// ══════════════════════════════════════
+// Equal highs/lows: two consecutive swings within `eqTolInput` * ATR of each other.
+// Draw a horizontal line connecting them — this is resting liquidity.
+
+float eqTolerance = atrValue > 0 ? atrValue * eqTolInput : 0.0
+
+var line eqhLine = na
+var label eqhLbl = na
+var line eqlLine = na
+var label eqlLbl = na
+var bool eqhActive = false
+var bool eqlActive = false
+var float eqhPrice = na
+var float eqlPrice = na
+
+// New EQH when swHigh1 ≈ swHigh2.
+// Line is LOCAL: drawn from first equal swing, extended `eqExtendBarsInput` bars right.
+// When a sweep consumes the EQH, the line is trimmed to the sweep bar (see sweep block).
+// Old active EQH line is deleted when a new one forms — swept (trimmed) lines remain as history.
+if newSwingHigh and not na(swHigh2) and math.abs(swHigh1 - swHigh2) <= eqTolerance and isWarmedUp
+    // If a previous EQH is still active (not yet swept), remove its drawing
+    if eqhActive
+        line.delete(eqhLine)
+        label.delete(eqhLbl)
+    eqhActive := true
+    eqhPrice := math.avg(swHigh1, swHigh2)
+    if showEqLevelsInput
+        eqhLine := line.new(swHigh2Idx, eqhPrice, swHigh1Idx + eqExtendBarsInput, eqhPrice, color = eqColorInput, style = line.style_dashed, width = 1)
+        eqhLbl := label.new(swHigh1Idx, eqhPrice, "EQH", color = color.new(eqColorInput, 100), textcolor = eqColorInput, style = label.style_label_down, size = size.tiny, tooltip = "Equal Highs (resting liquidity) @ " + str.tostring(eqhPrice, format.mintick))
+
+if newSwingLow and not na(swLow2) and math.abs(swLow1 - swLow2) <= eqTolerance and isWarmedUp
+    if eqlActive
+        line.delete(eqlLine)
+        label.delete(eqlLbl)
+    eqlActive := true
+    eqlPrice := math.avg(swLow1, swLow2)
+    if showEqLevelsInput
+        eqlLine := line.new(swLow2Idx, eqlPrice, swLow1Idx + eqExtendBarsInput, eqlPrice, color = eqColorInput, style = line.style_dashed, width = 1)
+        eqlLbl := label.new(swLow1Idx, eqlPrice, "EQL", color = color.new(eqColorInput, 100), textcolor = eqColorInput, style = label.style_label_up, size = size.tiny, tooltip = "Equal Lows (resting liquidity) @ " + str.tostring(eqlPrice, format.mintick))
+
+// ══════════════════════════════════════
+// LIQUIDITY SWEEP DETECTION
+// ══════════════════════════════════════
+// Bearish sweep (high-side): wick pierces above swHigh1 or EQH, but close stays below it.
+// Bullish sweep (low-side):  wick pierces below swLow1 or EQL, but close stays above it.
+
+bool sweepHigh = false
+bool sweepLow  = false
+float sweepHighRef = 0.0
+float sweepLowRef  = 0.0
+
+// Track already-swept swings by anchor index so the same level isn't swept twice.
+// NOTE: these are reset on CHoCH direction flip (see structure block) — old levels
+// become valid re-sweep targets in the new market context.
+var int lastSweptHighIdx = na
+var int lastSweptLowIdx  = na
+
+if barstate.isconfirmed and isWarmedUp
+    // Reference level: prefer EQH/EQL if active, else last swing.
+    // FIX v1.5.1: anchor index for EQH uses swHigh2Idx (start of EQ zone) — stable ID.
+    // Previously both ternary branches returned swHigh1Idx (copy-paste bug),
+    // causing inconsistent re-sweep tracking when EQH was active.
+    float refHigh = eqhActive ? eqhPrice : swHigh1
+    float refLow  = eqlActive ? eqlPrice : swLow1
+    int refHighIdx = eqhActive ? swHigh2Idx : swHigh1Idx
+    int refLowIdx  = eqlActive ? swLow2Idx  : swLow1Idx
+
+    bool canSweepHigh = not na(refHigh) and (na(lastSweptHighIdx) or refHighIdx != lastSweptHighIdx)
+    bool canSweepLow  = not na(refLow)  and (na(lastSweptLowIdx)  or refLowIdx  != lastSweptLowIdx)
+
+    if canSweepHigh and high > refHigh and close < refHigh and open < refHigh
+        sweepHigh := true
+        sweepHighRef := refHigh
+        lastSweptHighIdx := refHighIdx
+        // Consume EQH liquidity if it was the source — trim line to sweep bar
+        if eqhActive
+            eqhActive := false
+            if not na(eqhLine)
+                eqhLine.set_x2(bar_index)
+                eqhLine.set_color(color.new(eqColorInput, 50))
+
+    if canSweepLow and low < refLow and close > refLow and open > refLow
+        sweepLow := true
+        sweepLowRef := refLow
+        lastSweptLowIdx := refLowIdx
+        if eqlActive
+            eqlActive := false
+            if not na(eqlLine)
+                eqlLine.set_x2(bar_index)
+                eqlLine.set_color(color.new(eqColorInput, 50))
+
+if showSweepsInput and sweepHigh
+    label.new(bar_index, high, "✗", color = color.new(sweepColorInput, 100), textcolor = sweepColorInput, style = label.style_label_down, size = size.small, tooltip = "Liquidity Sweep HIGH @ " + str.tostring(sweepHighRef, format.mintick) + "\nWick pierced level, close returned below")
+
+if showSweepsInput and sweepLow
+    label.new(bar_index, low, "✗", color = color.new(sweepColorInput, 100), textcolor = sweepColorInput, style = label.style_label_up, size = size.small, tooltip = "Liquidity Sweep LOW @ " + str.tostring(sweepLowRef, format.mintick) + "\nWick pierced level, close returned above")
+
+// ══════════════════════════════════════
+// STRUCTURE DETECTION (BOS / CHoCH)
+// ══════════════════════════════════════
+
+var int structureBias = 0
+// NOTE: track broken levels by bar index, not by price value.
+// Price-based comparison could miss valid re-breaks if a new swing forms at an identical price.
+var int lastBrokenHighIdx = na
+var int lastBrokenLowIdx  = na
+
+// +1 = last CHoCH was bullish (long targets), -1 = bearish (short targets)
+var int lastChochDir = 0
+
+bool isBOS   = false
+bool isCHoCH = false
+bool isBullBreak = false
+bool isBearBreak = false
+
+bool bullBreakCond = not na(swHigh1) and barstate.isconfirmed and isWarmedUp and close > swHigh1 and (na(lastBrokenHighIdx) or swHigh1Idx != lastBrokenHighIdx)
+bool bearBreakCond = not na(swLow1) and barstate.isconfirmed and isWarmedUp and close < swLow1 and (na(lastBrokenLowIdx) or swLow1Idx != lastBrokenLowIdx)
+
+// Prevent simultaneous bull+bear breaks on the same bar (prioritize CHoCH)
+if bullBreakCond and bearBreakCond
+    if structureBias <= 0
+        bearBreakCond := false
+    else
+        bullBreakCond := false
+
+if bullBreakCond
+    if structureBias <= 0
+        isCHoCH := true
+        lastChochDir := 1
+        // v1.5.0: Reset swept trackers on direction flip — old levels may be valid re-sweep targets
+        lastSweptHighIdx := na
+        lastSweptLowIdx  := na
+    else
+        isBOS := true
+    structureBias := 1
+    isBullBreak := true
+    lastBrokenHighIdx := swHigh1Idx
+
+if bearBreakCond
+    if structureBias >= 0
+        isCHoCH := true
+        lastChochDir := -1
+        // v1.5.0: Reset swept trackers on direction flip
+        lastSweptHighIdx := na
+        lastSweptLowIdx  := na
+    else
+        isBOS := true
+    structureBias := -1
+    isBearBreak := true
+    lastBrokenLowIdx := swLow1Idx
+
+// ── Draw Structure Lines & Labels ──
+if showStructInput and (isBOS or isCHoCH)
+    float breakPrice = isBullBreak ? nz(swHigh1, close) : nz(swLow1, close)
+    color breakColor = isBullBreak ? bullColorInput : bearColorInput
+    string breakText = isCHoCH ? "CHoCH" : "BOS"
+    int startIdx = isBullBreak ? nz(swHigh1Idx, bar_index - 10) : nz(swLow1Idx, bar_index - 10)
+    int midIdx = math.round(math.avg(startIdx, bar_index))
+    line.new(startIdx, breakPrice, bar_index, breakPrice, color = breakColor, style = getLineStyle(structLineStyleInput), width = structLineWidthInput)
+    label.new(midIdx, breakPrice, breakText, color = color.new(breakColor, 100), textcolor = breakColor, style = isBullBreak ? label.style_label_down : label.style_label_up, size = size.small, tooltip = breakText + " @ " + str.tostring(breakPrice, format.mintick))
+
+// ══════════════════════════════════════
+// FIBONACCI RETRACEMENT ENGINE
+// (Direction flips based on last CHoCH)
+// ══════════════════════════════════════
+
+var float fibSwingHigh = na
+var float fibSwingLow  = na
+var int   fibSwingHighIdx = na
+var int   fibSwingLowIdx  = na
+var bool  fibNeedsRedraw = false
+var bool  fibHighIsLive = false
+var bool  fibLowIsLive  = false
+
+// +1 = bullish fib (targets above), -1 = bearish fib (targets below)
+var int fibDirection = 0
+
+// ── 1) On CHoCH: flip Fib direction and re-anchor ──
+if isCHoCH and isBullBreak
+    fibDirection := 1
+    fibSwingHigh := high
+    fibSwingHighIdx := bar_index
+    fibSwingLow := swLow1
+    fibSwingLowIdx := nz(swLow1Idx, bar_index - 10)
+    fibHighIsLive := true
+    fibLowIsLive := false
+    fibNeedsRedraw := true
+
+if isCHoCH and isBearBreak
+    fibDirection := -1
+    fibSwingLow := low
+    fibSwingLowIdx := bar_index
+    fibSwingHigh := swHigh1
+    fibSwingHighIdx := nz(swHigh1Idx, bar_index - 10)
+    fibLowIsLive := true
+    fibHighIsLive := false
+    fibNeedsRedraw := true
+
+// ── On BOS: update anchors, keep direction ──
+if isBOS and isBullBreak
+    fibSwingHigh := high
+    fibSwingHighIdx := bar_index
+    fibSwingLow := swLow1
+    fibSwingLowIdx := nz(swLow1Idx, bar_index - 10)
+    fibHighIsLive := true
+    fibLowIsLive := false
+    fibNeedsRedraw := true
+
+if isBOS and isBearBreak
+    fibSwingLow := low
+    fibSwingLowIdx := bar_index
+    fibSwingHigh := swHigh1
+    fibSwingHighIdx := nz(swHigh1Idx, bar_index - 10)
+    fibLowIsLive := true
+    fibHighIsLive := false
+    fibNeedsRedraw := true
+
+// ── 2) Trail live edge as price extends ──
+if not isBullBreak and not isBearBreak
+    if fibHighIsLive and not na(fibSwingHigh) and high > fibSwingHigh
+        fibSwingHigh := high
+        fibSwingHighIdx := bar_index
+        fibNeedsRedraw := true
+    if fibLowIsLive and not na(fibSwingLow) and low < fibSwingLow
+        fibSwingLow := low
+        fibSwingLowIdx := bar_index
+        fibNeedsRedraw := true
+
+// ── 3) Lock live edge when confirmed pivot arrives ──
+if newSwingHigh and fibHighIsLive and not na(swHigh1)
+    fibSwingHigh := swHigh1
+    fibSwingHighIdx := swHigh1Idx
+    fibHighIsLive := false
+    fibNeedsRedraw := true
+
+if newSwingLow and fibLowIsLive and not na(swLow1)
+    fibSwingLow := swLow1
+    fibSwingLowIdx := swLow1Idx
+    fibLowIsLive := false
+    fibNeedsRedraw := true
+
+// ── 4) Update locked anchors on new confirmed swings ──
+if newSwingHigh and not fibHighIsLive and not na(swHigh1) and not na(fibSwingHigh) and swHigh1 != fibSwingHigh
+    fibSwingHigh := swHigh1
+    fibSwingHighIdx := swHigh1Idx
+    fibNeedsRedraw := true
+
+if newSwingLow and not fibLowIsLive and not na(swLow1) and not na(fibSwingLow) and swLow1 != fibSwingLow
+    fibSwingLow := swLow1
+    fibSwingLowIdx := swLow1Idx
+    fibNeedsRedraw := true
+
+// ══════════════════════════════════════
+// FIBONACCI LEVEL CALCULATION
+// (Direction-aware: bullish vs bearish)
+// ══════════════════════════════════════
+
+var float fib236Price = na
+var float fib382Price = na
+var float fib500Price = na
+var float fib618Price = na
+var float fib786Price = na
+var float fibTargetPrice = na
+var float fibTgt50Price = na
+
+bool fibRangeValid = not na(fibSwingHigh) and not na(fibSwingLow) and fibSwingHigh > fibSwingLow and fibDirection != 0
+
+if fibRangeValid
+    if fibDirection == 1
+        // ── BULLISH: retracement from top toward low, targets ABOVE high ──
+        fib236Price := fibLevel(fibSwingHigh, fibSwingLow, 0.236)
+        fib382Price := fibLevel(fibSwingHigh, fibSwingLow, 0.382)
+        fib500Price := fibLevel(fibSwingHigh, fibSwingLow, 0.500)
+        fib618Price := fibLevel(fibSwingHigh, fibSwingLow, 0.618)
+        fib786Price := fibLevel(fibSwingHigh, fibSwingLow, 0.786)
+        fibTgt50Price := fibLevel(fibSwingHigh, fibSwingLow, -0.5)
+        fibTargetPrice := fibLevel(fibSwingHigh, fibSwingLow, -0.618)
+    else
+        // ── BEARISH: retracement from bottom toward high, targets BELOW low ──
+        float fibRange = fibSwingHigh - fibSwingLow
+        fib236Price := fibSwingLow + fibRange * 0.236
+        fib382Price := fibSwingLow + fibRange * 0.382
+        fib500Price := fibSwingLow + fibRange * 0.500
+        fib618Price := fibSwingLow + fibRange * 0.618
+        fib786Price := fibSwingLow + fibRange * 0.786
+        fibTgt50Price := fibSwingLow - fibRange * 0.5
+        fibTargetPrice := fibSwingLow - fibRange * 0.618
+else
+    fib236Price := na
+    fib382Price := na
+    fib500Price := na
+    fib618Price := na
+    fib786Price := na
+    fibTgt50Price := na
+    fibTargetPrice := na
+
+// ── Draw Fib Lines (direction-aware visuals) ──
+var line  fibLine236 = na
+var line  fibLine382 = na
+var line  fibLine500 = na
+var line  fibLine618 = na
+var line  fibLine786 = na
+var label fibLbl236 = na
+var label fibLbl382 = na
+var label fibLbl500 = na
+var label fibLbl618 = na
+var label fibLbl786 = na
+var line  fibRefLine = na
+var line  fibLineTarget = na
+var label fibLblTarget = na
+var line  fibLineTgt50 = na
+var label fibLblTgt50 = na
+var box   fibGoldenZone = na
+var box   fibTargetZone = na
+
+// Centralised fib cleanup: delete drawings AND reset refs to `na`.
+// Must be inline (not in a function) — Pine v6 doesn't allow reassigning
+// globally-scoped `var` objects inside a function scope reliably.
+
+if showFibInput and fibRangeValid
+    int rightEdge = bar_index + fibExtendInput
+    color targetColor = fibDirection == 1 ? bullColorInput : bearColorInput
+    string targetTooltipDir = fibDirection == 1 ? "Long" : "Short"
+
+    if fibNeedsRedraw
+        // Delete old drawings and reset refs so extend-branch can't touch freed handles
+        line.delete(fibLine236), line.delete(fibLine382), line.delete(fibLine500)
+        line.delete(fibLine618), line.delete(fibLine786), line.delete(fibRefLine)
+        line.delete(fibLineTarget), line.delete(fibLineTgt50)
+        label.delete(fibLbl236), label.delete(fibLbl382), label.delete(fibLbl500)
+        label.delete(fibLbl618), label.delete(fibLbl786), label.delete(fibLblTarget), label.delete(fibLblTgt50)
+        box.delete(fibGoldenZone), box.delete(fibTargetZone)
+        fibLine236 := na
+        fibLine382 := na
+        fibLine500 := na
+        fibLine618 := na
+        fibLine786 := na
+        fibRefLine := na
+        fibLineTarget := na
+        fibLineTgt50 := na
+        fibLbl236 := na
+        fibLbl382 := na
+        fibLbl500 := na
+        fibLbl618 := na
+        fibLbl786 := na
+        fibLblTarget := na
+        fibLblTgt50 := na
+        fibGoldenZone := na
+        fibTargetZone := na
+
+        color fibCol = fibColorInput
+
+        // Reference line from swing low to swing high
+        fibRefLine := line.new(fibSwingLowIdx, fibSwingLow, fibSwingHighIdx, fibSwingHigh, color = color.new(fibCol, 60), style = line.style_dotted, width = 1)
+
+        // Golden zone box — math.max/min ensures top > bottom regardless of direction
+        float gzTop = math.max(fib500Price, fib786Price)
+        float gzBot = math.min(fib500Price, fib786Price)
+        fibGoldenZone := box.new(bar_index, gzTop, rightEdge, gzBot, border_color = color.new(#FFD600, 70), bgcolor = color.new(#FFD600, 88), border_width = 0)
+
+        if showFib236Input
+            fibLine236 := line.new(bar_index, fib236Price, rightEdge, fib236Price, color = color.new(fibCol, 40), style = line.style_dotted, width = 1)
+            fibLbl236 := label.new(rightEdge, fib236Price, "0.236", color = color.new(fibCol, 100), textcolor = color.new(fibCol, 20), style = label.style_label_left, size = size.tiny, tooltip = "Fib 0.236: " + str.tostring(fib236Price, format.mintick))
+        if showFib382Input
+            fibLine382 := line.new(bar_index, fib382Price, rightEdge, fib382Price, color = color.new(fibCol, 30), style = line.style_dotted, width = 1)
+            fibLbl382 := label.new(rightEdge, fib382Price, "0.382", color = color.new(fibCol, 100), textcolor = color.new(fibCol, 10), style = label.style_label_left, size = size.tiny, tooltip = "Fib 0.382: " + str.tostring(fib382Price, format.mintick))
+        if showFib500Input
+            fibLine500 := line.new(bar_index, fib500Price, rightEdge, fib500Price, color = color.new(fibCol, 20), style = line.style_dashed, width = 2)
+            fibLbl500 := label.new(rightEdge, fib500Price, "0.500", color = color.new(fibCol, 100), textcolor = color.new(fibCol, 0), style = label.style_label_left, size = size.tiny, tooltip = "Fib 0.500: " + str.tostring(fib500Price, format.mintick))
+        if showFib618Input
+            fibLine618 := line.new(bar_index, fib618Price, rightEdge, fib618Price, color = color.new(fibCol, 10), style = line.style_solid, width = 2)
+            fibLbl618 := label.new(rightEdge, fib618Price, "0.618", color = color.new(fibCol, 100), textcolor = color.new(fibCol, 0), style = label.style_label_left, size = size.small, tooltip = "Fib 0.618 (Golden Ratio): " + str.tostring(fib618Price, format.mintick))
+        if showFib786Input
+            fibLine786 := line.new(bar_index, fib786Price, rightEdge, fib786Price, color = color.new(fibCol, 30), style = line.style_dotted, width = 1)
+            fibLbl786 := label.new(rightEdge, fib786Price, "0.786", color = color.new(fibCol, 100), textcolor = color.new(fibCol, 10), style = label.style_label_left, size = size.tiny, tooltip = "Fib 0.786: " + str.tostring(fib786Price, format.mintick))
+        if showFibTargetInput
+            string tgtLabel = fibDirection == 1 ? "Target ↑" : "Target ↓"
+            fibLineTarget := line.new(bar_index, fibTargetPrice, rightEdge, fibTargetPrice, color = targetColor, style = line.style_dashed, width = 2)
+            fibLblTarget := label.new(rightEdge, fibTargetPrice, tgtLabel, color = color.new(targetColor, 100), textcolor = targetColor, style = label.style_label_left, size = size.small, tooltip = targetTooltipDir + " Target (-0.618): " + str.tostring(fibTargetPrice, format.mintick))
+        if showFibTgt50Input
+            string tgt50Label = fibDirection == 1 ? "-0.5 ↑" : "-0.5 ↓"
+            fibLineTgt50 := line.new(bar_index, fibTgt50Price, rightEdge, fibTgt50Price, color = color.new(targetColor, 40), style = line.style_dotted, width = 1)
+            fibLblTgt50 := label.new(rightEdge, fibTgt50Price, tgt50Label, color = color.new(targetColor, 100), textcolor = color.new(targetColor, 40), style = label.style_label_left, size = size.tiny, tooltip = targetTooltipDir + " -0.5: " + str.tostring(fibTgt50Price, format.mintick))
+
+        // Target zone box — math.max/min for safe ordering
+        if showFibTargetInput or showFibTgt50Input
+            float tzTop = math.max(fibTgt50Price, fibTargetPrice)
+            float tzBot = math.min(fibTgt50Price, fibTargetPrice)
+            color tzColor = fibDirection == 1 ? bullColorInput : bearColorInput
+            fibTargetZone := box.new(bar_index, tzTop, rightEdge, tzBot, border_color = color.new(tzColor, 70), bgcolor = color.new(tzColor, 88), border_width = 0)
+
+        fibNeedsRedraw := false
+    else
+        // Extend existing lines to the right
+        int rEdge = bar_index + fibExtendInput
+        if not na(fibLine236)
+            fibLine236.set_x2(rEdge), fibLbl236.set_x(rEdge)
+        if not na(fibLine382)
+            fibLine382.set_x2(rEdge), fibLbl382.set_x(rEdge)
+        if not na(fibLine500)
+            fibLine500.set_x2(rEdge), fibLbl500.set_x(rEdge)
+        if not na(fibLine618)
+            fibLine618.set_x2(rEdge), fibLbl618.set_x(rEdge)
+        if not na(fibLine786)
+            fibLine786.set_x2(rEdge), fibLbl786.set_x(rEdge)
+        if not na(fibLineTarget)
+            fibLineTarget.set_x2(rEdge), fibLblTarget.set_x(rEdge)
+        if not na(fibLineTgt50)
+            fibLineTgt50.set_x2(rEdge), fibLblTgt50.set_x(rEdge)
+        if not na(fibGoldenZone)
+            fibGoldenZone.set_right(rEdge)
+        if not na(fibTargetZone)
+            fibTargetZone.set_right(rEdge)
+
+if not showFibInput or not fibRangeValid
+    fibNeedsRedraw := false
+
+// ══════════════════════════════════════
+// PREMIUM / DISCOUNT ZONES (Direction-aware)
+// ══════════════════════════════════════
+bool inPremium = false
+bool inDiscount = false
+
+if not na(fib500Price) and fibRangeValid
+    if fibDirection == 1
+        inPremium := close > fib500Price
+        inDiscount := close <= fib500Price
+    else
+        inPremium := close < fib500Price
+        inDiscount := close >= fib500Price
+
+// ══════════════════════════════════════
+// CONFLUENCE SCORING (Weighted)
+// ══════════════════════════════════════
+
+float confTolerance = atrValue > 0 ? atrValue * confluenceTolInput : 0.001
+
+// NOTE: check wick touch (high/low) in addition to close.
+// Rationale: a wick that pierces a fib level and pulls back is a valid test,
+// but a `close`-only check would miss it.
+isNearLevel(float level) =>
+    if na(level)
+        false
+    else
+        math.abs(close - level) <= confTolerance or (low <= level + confTolerance and high >= level - confTolerance)
+
+float confluenceWeight = 0.0
+
+if showFib236Input and isNearLevel(fib236Price)
+    confluenceWeight += 1.0
+if isNearLevel(fib382Price)
+    confluenceWeight += 1.5
+if isNearLevel(fib500Price)
+    confluenceWeight += 2.0
+if isNearLevel(fib618Price)
+    confluenceWeight += 2.5
+if isNearLevel(fib786Price)
+    confluenceWeight += 1.5
+if not na(swHigh1) and isNearLevel(swHigh1)
+    confluenceWeight += 1.0
+if not na(swLow1) and isNearLevel(swLow1)
+    confluenceWeight += 1.0
+
+// Sweep boost: a liquidity sweep is a strong reversal tell
+if sweepAddsConfInput and (sweepHigh or sweepLow)
+    confluenceWeight += 2.0
+
+float confluenceScore = math.min(confluenceWeight * 10.0, 100.0)
+
+string confluenceStr = confluenceScore >= 60 ? "Strong" : confluenceScore >= 30 ? "Moderate" : confluenceScore > 0 ? "Weak" : "None"
+color confluenceClr = confluenceScore >= 60 ? bullColorInput : confluenceScore >= 30 ? confluenceColorInput : confluenceScore > 0 ? color.new(confluenceColorInput, 50) : TEXT_MUTED
+
+// ══════════════════════════════════════
+// ENGULFING PATTERN DETECTION
+// ══════════════════════════════════════
+
+float bodyHi = math.max(close, open)
+float bodyLo = math.min(close, open)
+float body = bodyHi - bodyLo
+float bodyAvg = nz(ta.ema(body, 14), body)
+bool isLongBody = body > bodyAvg
+bool isSmallPrev = nz(body[1], 0.0) < nz(bodyAvg[1], bodyAvg)
+// NOTE: explicit body > body[1] for strict engulfing semantics
+bool bodyIsBigger = body > nz(body[1], 0.0)
+
+// v1.5.2: toggle between strict (classic) and loose engulfing semantics.
+// Strict: both body bounds must STRICTLY exceed previous body — true engulfing.
+// Loose: allows equality on one side (e.g. open == close[1]) — more permissive.
+bool bearishEngulf = false
+bool bullishEngulf = false
+
+if strictEngulfInput
+    // STRICT: open > close[1] AND close < open[1] (bearish), mirrored for bullish
+    bearishEngulf := close < open and isLongBody and bodyIsBigger and close[1] > open[1] and isSmallPrev and open > close[1] and close < open[1]
+    bullishEngulf := close > open and isLongBody and bodyIsBigger and close[1] < open[1] and isSmallPrev and open < close[1] and close > open[1]
+else
+    // LOOSE: equality on one side allowed, but at least one side must strictly exceed
+    bearishEngulf := close < open and isLongBody and bodyIsBigger and close[1] > open[1] and isSmallPrev and close <= open[1] and open >= close[1] and (close < open[1] or open > close[1])
+    bullishEngulf := close > open and isLongBody and bodyIsBigger and close[1] < open[1] and isSmallPrev and close >= open[1] and open <= close[1] and (close > open[1] or open < close[1])
+
+bool bearEngulfCtx = bearishEngulf and barstate.isconfirmed and isWarmedUp and (inPremium or confluenceWeight >= 1.5)
+bool bullEngulfCtx = bullishEngulf and barstate.isconfirmed and isWarmedUp and (inDiscount or confluenceWeight >= 1.5)
+
+if showEngulfInput and bearEngulfCtx
+    label.new(bar_index, high, "▼", color = color.new(bearColorInput, 100), textcolor = bearColorInput, style = label.style_label_down, size = size.small, tooltip = "Bearish Engulfing in Premium / Fib Zone")
+
+if showEngulfInput and bullEngulfCtx
+    label.new(bar_index, low, "▲", color = color.new(bullColorInput, 100), textcolor = bullColorInput, style = label.style_label_up, size = size.small, tooltip = "Bullish Engulfing in Discount / Fib Zone")
+
+// ══════════════════════════════════════
+// SIGNAL LOGIC (unified cooldown + mutual exclusion + trigger tracking)
+// ══════════════════════════════════════
+// FIX v1.5.1: single shared cooldown counter prevents buy↔sell ping-pong.
+// FIX v1.5.1: if both buyRaw and sellRaw fire on same bar (e.g. sweep low + bearish engulf),
+// neither fires — contradictory signals indicate noise, not setup.
+
+var int barsSinceLastSignal = 999
+barsSinceLastSignal += 1
+
+// Sweeps can trigger signals on their own if confluence is strong enough.
+// FIX v1.5.1: explicit isWarmedUp gate (sweep detection itself is gated, but
+// belt-and-suspenders here protects against edge cases on early bars).
+bool sweepBuySignal  = sweepLow  and barstate.isconfirmed and isWarmedUp and (inDiscount or confluenceWeight >= 2.0)
+bool sweepSellSignal = sweepHigh and barstate.isconfirmed and isWarmedUp and (inPremium or confluenceWeight >= 2.0)
+
+// Track individual trigger conditions for buy
+bool buyEngulf = bullEngulfCtx and structureBias == 1 and confluenceWeight >= 1.5
+bool buyChoch  = isCHoCH and isBullBreak
+bool buySweep  = sweepBuySignal
+
+// Track individual trigger conditions for sell
+bool sellEngulf = bearEngulfCtx and structureBias == -1 and confluenceWeight >= 1.5
+bool sellChoch  = isCHoCH and isBearBreak
+bool sellSweep  = sweepSellSignal
+
+bool buyRaw  = buyEngulf or buyChoch or buySweep
+bool sellRaw = sellEngulf or sellChoch or sellSweep
+
+// Mutual exclusion: contradictory signals on the same bar cancel each other
+bool conflict = buyRaw and sellRaw
+if conflict
+    buyRaw  := false
+    sellRaw := false
+
+bool confirmedBuy  = buyRaw and barsSinceLastSignal >= cooldownInput and isWarmedUp
+bool confirmedSell = sellRaw and barsSinceLastSignal >= cooldownInput and isWarmedUp
+
+// v1.5.0: Build trigger string (joined with "+" for combo setups)
+// Order: choch → sweep → engulf (most structural to most tactical)
+string buyTrigger = ""
+if confirmedBuy
+    buyTrigger := buyChoch ? "choch" : ""
+    if buySweep
+        buyTrigger := buyTrigger == "" ? "sweep" : buyTrigger + "+sweep"
+    if buyEngulf
+        buyTrigger := buyTrigger == "" ? "engulf" : buyTrigger + "+engulf"
+
+string sellTrigger = ""
+if confirmedSell
+    sellTrigger := sellChoch ? "choch" : ""
+    if sellSweep
+        sellTrigger := sellTrigger == "" ? "sweep" : sellTrigger + "+sweep"
+    if sellEngulf
+        sellTrigger := sellTrigger == "" ? "engulf" : sellTrigger + "+engulf"
+
+if confirmedBuy or confirmedSell
+    barsSinceLastSignal := 0
+
+// ══════════════════════════════════════
+// SIGNAL VISUALS
+// ══════════════════════════════════════
+plotshape(showSignalsInput and confirmedBuy ? low : na, "Buy Signal", style = shape.labelup, location = location.belowbar, color = bullColorInput, textcolor = LABEL_TEXT, text = "BUY", size = size.small)
+plotshape(showSignalsInput and confirmedSell ? high : na, "Sell Signal", style = shape.labeldown, location = location.abovebar, color = bearColorInput, textcolor = LABEL_TEXT, text = "SELL", size = size.small)
+
+// ══════════════════════════════════════
+// NEAREST FIB CALCULATION (for dashboard)
+// ══════════════════════════════════════
+// v1.5.0: scan all active fib levels, find the one closest to current close.
+// Distance is reported in ATR units for instrument-agnostic readability.
+// v1.5.1: removed unused `nearestFibPrice` (was assigned but never displayed)
+
+string nearestFibName = "—"
+float nearestFibDist = na
+
+if fibRangeValid
+    array<float> fibPrices = array.from(fib236Price, fib382Price, fib500Price, fib618Price, fib786Price, fibTgt50Price, fibTargetPrice)
+    array<string> fibNames = array.from("0.236", "0.382", "0.500", "0.618", "0.786", "-0.5", "-0.618")
+    float minDist = na
+    int minIdx = -1
+    for i = 0 to array.size(fibPrices) - 1
+        float lvl = array.get(fibPrices, i)
+        if not na(lvl)
+            float d = math.abs(close - lvl)
+            if na(minDist) or d < minDist
+                minDist := d
+                minIdx := i
+    if minIdx >= 0
+        nearestFibName := array.get(fibNames, minIdx)
+        nearestFibDist := minDist
+
+// ══════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════
+// v1.5.0: expanded to 12 rows — added ATR(14) and Near Fib (with ATR-distance)
+var table dashTable = table.new(getDashPos(dashPosStr), 2, 12, TABLE_BG, TABLE_BORDER, 1, TABLE_BORDER, 1)
+
+if showDashInput and barstate.islast
+    table.cell(dashTable, 0, 0, "FibStruct", text_color = #FFFFFF, bgcolor = HEADER_BG, text_size = size.small, text_halign = text.align_center)
+    table.merge_cells(dashTable, 0, 0, 1, 0)
+
+    string trendStr = structureBias > 0 ? "Bullish" : structureBias < 0 ? "Bearish" : "Neutral"
+    color trendClr = structureBias > 0 ? bullColorInput : structureBias < 0 ? bearColorInput : TEXT_MUTED
+    table.cell(dashTable, 0, 1, "Trend", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 1, trendStr, text_color = trendClr, text_size = size.tiny, bgcolor = TABLE_BG)
+
+    string fibDirStr = lastChochDir > 0 ? "Long ↑" : lastChochDir < 0 ? "Short ↓" : "—"
+    color fibDirClr = lastChochDir > 0 ? bullColorInput : lastChochDir < 0 ? bearColorInput : TEXT_MUTED
+    table.cell(dashTable, 0, 2, "Fib Dir", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 2, fibDirStr, text_color = fibDirClr, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+
+    string sigStr = confirmedBuy ? "BUY" : confirmedSell ? "SELL" : "—"
+    color sigClr = confirmedBuy ? bullColorInput : confirmedSell ? bearColorInput : TEXT_MUTED
+    table.cell(dashTable, 0, 3, "Signal", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 3, sigStr, text_color = sigClr, text_size = size.tiny, bgcolor = TABLE_BG)
+
+    table.cell(dashTable, 0, 4, "Confluence", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 4, confluenceStr + " (" + str.tostring(confluenceScore, "#") + ")", text_color = confluenceClr, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+
+    string zoneStr = inPremium ? "Premium" : inDiscount ? "Discount" : "—"
+    color zoneClr = inPremium ? bearColorInput : inDiscount ? bullColorInput : TEXT_MUTED
+    table.cell(dashTable, 0, 5, "Zone", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 5, zoneStr, text_color = zoneClr, text_size = size.tiny, bgcolor = TABLE_BG)
+
+    string liqStr = eqhActive and eqlActive ? "EQH+EQL" : eqhActive ? "EQH ↑" : eqlActive ? "EQL ↓" : "—"
+    color liqClr = (eqhActive or eqlActive) ? eqColorInput : TEXT_MUTED
+    table.cell(dashTable, 0, 6, "Liquidity", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 6, liqStr, text_color = liqClr, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+
+    table.cell(dashTable, 0, 7, "Fib .618", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 7, na(fib618Price) ? "—" : str.tostring(fib618Price, format.mintick), text_color = fibColorInput, text_size = size.tiny, bgcolor = TABLE_BG)
+
+    // v1.5.0: ATR row — useful for position sizing and SL distance estimates
+    table.cell(dashTable, 0, 8, "ATR(14)", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 8, str.tostring(atrValue, format.mintick), text_color = TEXT_COLOR, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+
+    // v1.5.0: Nearest Fib + distance in ATR units
+    // Highlights yellow when price is within confluence tolerance — visual cue for entry zone
+    string nearFibStr = "—"
+    color nearFibClr = TEXT_MUTED
+    if not na(nearestFibDist) and atrValue > 0
+        float distInAtr = nearestFibDist / atrValue
+        nearFibStr := nearestFibName + " (" + str.tostring(distInAtr, "0.00") + " ATR)"
+        nearFibClr := distInAtr <= confluenceTolInput ? confluenceColorInput : fibColorInput
+    table.cell(dashTable, 0, 9, "Near Fib", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 9, nearFibStr, text_color = nearFibClr, text_size = size.tiny, bgcolor = TABLE_BG)
+
+    table.cell(dashTable, 0, 10, "TF", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 10, timeframe.period, text_color = TEXT_COLOR, text_size = size.tiny, bgcolor = TABLE_ROW_ALT)
+
+    table.cell(dashTable, 0, 11, "Version", text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_BG)
+    table.cell(dashTable, 1, 11, INDICATOR_VERSION, text_color = TEXT_MUTED, text_size = size.tiny, bgcolor = TABLE_BG)
+
+// ══════════════════════════════════════
+// WATERMARK
+// ══════════════════════════════════════
+var table wmTable = table.new(position = position.bottom_center, columns = 1, rows = 1, bgcolor = color.new(color.black, 100), border_color = color.new(color.black, 100), border_width = 0, frame_color = color.new(color.black, 100), frame_width = 0)
+
+if barstate.islast and showWatermarkInput
+    table.cell(wmTable, 0, 0, "WillyAlgoTrader", text_color = WM_COLOR, text_size = size.normal, text_halign = text.align_center, bgcolor = color.new(color.black, 100))
+
+// ══════════════════════════════════════
+// ALERTS
+// ══════════════════════════════════════
+string tickerStr = syminfo.tickerid
+string tfStr = timeframe.period
+string priceStr = str.tostring(close, format.mintick)
+string confAlertStr = str.tostring(confluenceScore, "#")
+
+if confirmedBuy
+    string slStr = str.tostring(close - atrValue * 1.5, format.mintick)
+    string tpStr = str.tostring(close + atrValue * 2.5, format.mintick)
+    // v1.5.0: includes "trigger" field for downstream bot routing
+    string jMsg = '{"action":"buy","ticker":"' + tickerStr + '","price":' + str.tostring(close) + ',"tf":"' + tfStr + '","trigger":"' + buyTrigger + '","confluence":' + confAlertStr + ',"sl":' + slStr + ',"tp":' + tpStr + '}'
+    string tMsg = "🟢 BUY [" + buyTrigger + "] | " + tickerStr + " | TF: " + tfStr + " | Price: " + priceStr + " | Conf: " + confAlertStr + " | SL: " + slStr + " | TP: " + tpStr
+    alert(webhookInput ? jMsg : tMsg, alert.freq_once_per_bar_close)
+
+if confirmedSell
+    string slStr = str.tostring(close + atrValue * 1.5, format.mintick)
+    string tpStr = str.tostring(close - atrValue * 2.5, format.mintick)
+    string jMsg = '{"action":"sell","ticker":"' + tickerStr + '","price":' + str.tostring(close) + ',"tf":"' + tfStr + '","trigger":"' + sellTrigger + '","confluence":' + confAlertStr + ',"sl":' + slStr + ',"tp":' + tpStr + '}'
+    string tMsg = "🔴 SELL [" + sellTrigger + "] | " + tickerStr + " | TF: " + tfStr + " | Price: " + priceStr + " | Conf: " + confAlertStr + " | SL: " + slStr + " | TP: " + tpStr
+    alert(webhookInput ? jMsg : tMsg, alert.freq_once_per_bar_close)
+
+if isBOS
+    string dirStr = isBullBreak ? "bull" : "bear"
+    string jMsg = '{"action":"bos","ticker":"' + tickerStr + '","price":' + str.tostring(close) + ',"direction":"' + dirStr + '"}'
+    string tMsg = "🔵 BOS | " + tickerStr + " | TF: " + tfStr + " | Price: " + priceStr + " | Dir: " + dirStr
+    alert(webhookInput ? jMsg : tMsg, alert.freq_once_per_bar_close)
+
+if isCHoCH
+    string dirStr = isBullBreak ? "bull" : "bear"
+    string jMsg = '{"action":"choch","ticker":"' + tickerStr + '","price":' + str.tostring(close) + ',"direction":"' + dirStr + '"}'
+    string tMsg = "🟡 CHoCH | " + tickerStr + " | TF: " + tfStr + " | Price: " + priceStr + " | Dir: " + dirStr
+    alert(webhookInput ? jMsg : tMsg, alert.freq_once_per_bar_close)
+
+// Liquidity sweep alerts
+if sweepHigh
+    string jMsg = '{"action":"sweep","ticker":"' + tickerStr + '","price":' + str.tostring(close) + ',"direction":"high","level":' + str.tostring(sweepHighRef, format.mintick) + '}'
+    string tMsg = "🟠 SWEEP HIGH | " + tickerStr + " | TF: " + tfStr + " | Level: " + str.tostring(sweepHighRef, format.mintick) + " | Close: " + priceStr
+    alert(webhookInput ? jMsg : tMsg, alert.freq_once_per_bar_close)
+
+if sweepLow
+    string jMsg = '{"action":"sweep","ticker":"' + tickerStr + '","price":' + str.tostring(close) + ',"direction":"low","level":' + str.tostring(sweepLowRef, format.mintick) + '}'
+    string tMsg = "🟠 SWEEP LOW | " + tickerStr + " | TF: " + tfStr + " | Level: " + str.tostring(sweepLowRef, format.mintick) + " | Close: " + priceStr
+    alert(webhookInput ? jMsg : tMsg, alert.freq_once_per_bar_close)
+
+// ══════════════════════════════════════
+// CLEANUP
+// ══════════════════════════════════════
+if array.size(label.all) > 490
+    label.delete(array.shift(label.all))
+if array.size(line.all) > 490
+    line.delete(array.shift(line.all))
+if array.size(box.all) > 490
+    box.delete(array.shift(box.all))

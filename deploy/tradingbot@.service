@@ -1,0 +1,30 @@
+# systemd template unit for AWS (Ubuntu/Amazon Linux). One service per bot.
+#
+# Install (as root):
+#   sudo cp deploy/tradingbot@.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now tradingbot@precision_sniper
+#   sudo systemctl enable --now tradingbot@pulse_trend_radar
+#   ...one per bot (the part after @ is the config filename without .yaml)
+#
+# Logs:  journalctl -u tradingbot@precision_sniper -f
+#
+# Assumes the repo lives at /opt/trading_bots with a venv at /opt/trading_bots/venv
+# and a populated .env in that directory.
+
+[Unit]
+Description=Trading bot (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/trading_bots
+EnvironmentFile=/opt/trading_bots/.env
+ExecStart=/opt/trading_bots/venv/bin/python run_bot.py --config configs/%i.yaml
+Restart=always
+RestartSec=10
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target

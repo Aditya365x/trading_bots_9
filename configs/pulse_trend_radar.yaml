@@ -1,0 +1,27 @@
+# Pulse Trend Radar — KAMA + median-ATR bands, trend-flip
+name: pulse_trend_radar
+strategy: pulse_trend_radar
+symbols: [ETHUSDT]    # unique coin -> no position clash on shared account
+timeframe: 5m
+market: futures
+
+leverage: 1
+risk_per_trade_pct: 1.0
+max_position_usdt: 0
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  er_length: 13
+  fast_alpha: 2
+  slow_alpha: 30
+  band_mult: 1.8
+  atr_length: 50
+  sl_mult: 3.0
+  tp1: 1.0
+  tp2: 2.0
+  tp3: 3.0

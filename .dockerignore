@@ -1,0 +1,12 @@
+# Keep the image small & never bake secrets / local junk into it.
+venvbots/
+venv/
+logs/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.git/
+.gitignore
+PineScripts/
+scripts/run_all_local.ps1
