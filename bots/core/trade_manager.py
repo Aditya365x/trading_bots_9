@@ -69,9 +69,10 @@ class TradeManager:
         if risk_dist <= 0:
             return 0.0
         balance = 10_000.0 if self.cfg.dry_run else self.client.wallet_balance("USDT")
-        risk_amt = balance * (self.cfg.risk_per_trade_pct / 100.0)
+        # absolute $ risk if set, else % of balance
+        risk_amt = self.cfg.risk_usdt if self.cfg.risk_usdt > 0 else balance * (self.cfg.risk_per_trade_pct / 100.0)
         qty = risk_amt / risk_dist
-        # cap by max notional / available leverage
+        # cap by max notional (margin used = notional / leverage)
         notional_cap = self.cfg.max_position_usdt or (balance * self.cfg.leverage)
         qty = min(qty, notional_cap / entry)
         if self.cfg.dry_run:

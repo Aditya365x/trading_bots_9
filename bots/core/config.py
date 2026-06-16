@@ -31,7 +31,8 @@ class BotConfig:
     # --- risk / sizing ---
     leverage: int = 1
     risk_per_trade_pct: float = 1.0          # % of wallet balance risked per trade
-    max_position_usdt: float = 0.0           # 0 = no extra cap beyond risk sizing
+    risk_usdt: float = 0.0                    # absolute $ risk per trade; >0 overrides the % above
+    max_position_usdt: float = 0.0           # notional cap (margin = notional / leverage)
     use_break_even: bool = True              # move SL to entry after TP1
     tp_split: list[float] = field(default_factory=lambda: [0.34, 0.33, 0.33])  # TP1/2/3 portions
 

@@ -5,9 +5,10 @@ symbols: [DOGEUSDT]    # unique coin -> no position clash on shared account
 timeframe: 5m
 market: futures
 
-leverage: 1
+leverage: 10
 risk_per_trade_pct: 1.0
-max_position_usdt: 400          # cap per-bot notional so all 9 fit the shared 5000 USDT wallet
+risk_usdt: 2          # absolute max risk per trade in USD (overrides the % above)
+max_position_usdt: 100          # $10 margin x 10x leverage = $100 notional
 use_break_even: true
 tp_split: [0.34, 0.33, 0.33]
 
