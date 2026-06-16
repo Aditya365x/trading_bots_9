@@ -98,9 +98,11 @@ class TradeManager:
         if not self.cfg.dry_run:
             try:
                 self.client.set_leverage(symbol, self.cfg.leverage)
-                self.client.market_order(symbol, side, qty)
-                st.sl_order_id = self.client.stop_market(
-                    symbol, close_side, sig.sl, close_position=True)["orderId"]
+                mo = self.client.market_order(symbol, side, qty)
+                if not isinstance(mo, dict) or not mo.get("orderId"):
+                    raise RuntimeError(f"market order not accepted: {mo}")
+                sl_resp = self.client.stop_market(symbol, close_side, sig.sl, close_position=True)
+                st.sl_order_id = sl_resp.get("orderId") if isinstance(sl_resp, dict) else None
                 # split qty across TPs
                 splits = self.cfg.tp_split
                 q1 = self.client.round_qty(symbol, qty * splits[0])
@@ -108,8 +110,10 @@ class TradeManager:
                 q3 = self.client.round_qty(symbol, max(0.0, qty - q1 - q2))
                 for tp, q in ((sig.tp1, q1), (sig.tp2, q2), (sig.tp3, q3)):
                     if q > 0:
-                        oid = self.client.take_profit_market(symbol, close_side, tp, q)["orderId"]
-                        st.tp_order_ids.append(oid)
+                        resp = self.client.take_profit_market(symbol, close_side, tp, q)
+                        oid = resp.get("orderId") if isinstance(resp, dict) else None
+                        if oid:
+                            st.tp_order_ids.append(oid)
             except Exception as exc:  # noqa: BLE001
                 log.error("open_trade %s failed: %s", symbol, exc)
                 self.notifier.error(f"{symbol} entry failed: {exc}")

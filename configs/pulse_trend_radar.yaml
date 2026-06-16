@@ -7,7 +7,7 @@ market: futures
 
 leverage: 1
 risk_per_trade_pct: 1.0
-max_position_usdt: 0
+max_position_usdt: 400          # cap per-bot notional so all 9 fit the shared 5000 USDT wallet
 use_break_even: true
 tp_split: [0.34, 0.33, 0.33]
 
