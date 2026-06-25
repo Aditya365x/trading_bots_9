@@ -2,7 +2,7 @@
 name: ict_session_zones
 strategy: ict_session_zones
 symbols: [HYPEUSDT]    # unique coin -> no position clash on shared account
-timeframe: 5m
+timeframe: 15m          # primary trading TF
 market: futures
 
 leverage: 10

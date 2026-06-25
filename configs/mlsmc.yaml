@@ -1,0 +1,32 @@
+# ML Smart Money Concepts — KNN-classified CHoCH (GainzAlgo port, strategies2/mlsmc.pine)
+# Needs a LARGE lookback so the KNN database has history (window_len + slack).
+name: mlsmc
+strategy: mlsmc
+symbols: [DOTUSDT]            # unique coin -> no position clash on shared account
+timeframe: 15m
+market: futures
+
+leverage: 10
+risk_per_trade_pct: 1.0
+risk_usdt: 0
+max_position_usdt: 100
+use_break_even: true
+tp_split: [0.40, 0.30, 0.30]      # TP1 conservative / TP2 median / TP3 aggressive
+
+lookback_bars: 1700               # >= window_len(1500) + warmup slack
+poll_seconds: 5
+dry_run: true                     # validate before going live
+
+params:
+  # --- Quant engine (Pine defaults) ---
+  swing_len: 5                    # pivot length for swing highs/lows
+  atr_len: 14
+  lookahead: 20                   # bars used to label a CHoCH outcome
+  window_len: 1500                # KNN historical memory window
+  k_neighbors: 5                  # K
+  min_score: 60                   # min significance score (%) to take a trade
+  target_scalar: 0.5              # TP1 = mean run × this (conservative)
+  # --- risk (added; Pine has no stop) ---
+  sl_buffer_atr: 0.5              # SL beyond the opposing swing, in ATR
+  sl_fallback_atr: 1.5            # SL if no swing available
+  min_target_atr: 0.5            # floor on TP distances (× ATR) if KNN runs are tiny

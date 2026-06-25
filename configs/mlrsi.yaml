@@ -1,0 +1,47 @@
+# ML RSI — kNN analog-matching engine (Zeiierman port)
+name: mlrsi
+strategy: mlrsi
+symbols: [LINKUSDT]            # unique coin -> no position clash on shared account
+timeframe: 15m
+market: futures
+
+leverage: 10
+risk_per_trade_pct: 1.0
+risk_usdt: 2
+max_position_usdt: 100
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  # ML brain
+  rsi_base: 14
+  memory_depth: 500
+  k_neighbors: 8
+  win_len: 100
+  spacing_bars: 4
+  horizon_bars: 4
+  step_len: 3
+  atr_factor: 0.5          # learning sensitivity (×ATR) for win/loss labels
+  auto_weights: true       # Fisher-discriminant feature weighting
+  # signal gates
+  gate_rank: 60
+  gate_conf: 50
+  use_trend_gate: true
+  use_vol_band: true
+  vol_band_lo: 20
+  use_chop: true
+  cooldown_bars: 5
+  # adaptive supertrend (also the trailing stop)
+  st_mult: 1.5
+  st_ml_resp: 1.0
+  st_atr_len: 10
+  smooth_len: 10
+  # trade exits
+  sl_mult: 1.5             # ATR fallback if the supertrend line is on the wrong side
+  tp1: 1.0
+  tp2: 2.0
+  tp3: 3.0

@@ -1,0 +1,34 @@
+# Bollinger Band Breakout — volatility-expansion breakout (port)
+name: bollinger_breakout
+strategy: bollinger_breakout
+symbols: [NEARUSDT]            # unique coin -> no position clash on shared account
+timeframe: 15m            # primary trading TF
+market: futures
+
+leverage: 10
+risk_per_trade_pct: 1.0
+risk_usdt: 2
+max_position_usdt: 100
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  bb_len: 15
+  bb_dev: 2.0
+  volatility_filter: true   # only trade when stdev > its MA (expanding vol)
+  vol_sd_len: 15
+  vol_ma_len: 15
+  trend_filter: false       # optional EMA trend gate
+  trend_period: 223
+  roc_filter: false         # optional rate-of-change gate
+  roc_period: 24            # bars (~6h at 15m)
+  roc_threshold: 1.0
+  direction: "Long&Short"   # Long&Short | Long Only | Short Only
+  sl_pct: 2.0               # percent stop (matches original)
+  tp1_pct: 3.0
+  tp2_pct: 6.0
+  tp3_pct: 9.0              # original single 9% TP becomes TP3

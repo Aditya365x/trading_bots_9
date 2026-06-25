@@ -1,0 +1,69 @@
+# TRAP MASTER — liquidity-engineering price-action system (price_action.md)
+# 15-minute primary; 15m + 1h context are resampled inside the strategy, so
+# lookback_bars must be large enough to build the 1h context.
+name: trap_master
+strategy: trap_master
+symbols: [SUIUSDT] # unique coin -> no position clash on shared account
+timeframe: 15m # primary trading TF (HTF context becomes 15m-self + 1h on a 15m feed)
+market: futures
+
+leverage: 10
+risk_per_trade_pct: 1.0 # Part 8 base risk (scaled by quality risk_mult)
+risk_usdt: 0 # >0 overrides the % above with an absolute $ risk
+max_position_usdt: 100
+use_break_even: true # SL -> entry after TP1 (blueprint Part 9)
+tp_split: [0.40, 0.30, 0.30] # Setup 1 split; manager applies one split globally
+
+lookback_bars: 1200 # MUST stay high enough to build the 1h context
+poll_seconds: 5
+dry_run: true # flip to false only after you have validated it
+
+params:
+  # --- core periods (Part 2) ---
+  atr_len: 14
+  warmup: 210 # need EMA200 on 15m before trading
+
+  # --- swing engine (Part 3) ---
+  swing_left: 2
+  swing_right: 2
+  swing_min_retr: 0.0015 # 0.15% min retracement to count a swing
+  swing_min_bars: 5 # min bars between same-type swings
+
+  # --- zones / pools (Part 5) ---
+  zone_lookback: 50
+  zone_cluster: 0.002 # 0.2% clustering tolerance
+  zone_near: 0.0015 # "near a zone" tolerance (Setup 3)
+  zone_proximity: 0.003 # 5.6 — price must be within this of a zone to trade at all
+  eqhl_tol: 0.0008 # equal highs/lows magnet tolerance
+  fvg_body: 0.5 # middle-candle body fraction for an FVG
+  pool_min_strength: 2 # >=2 prior sweeps to qualify a pool (lower -> more trades)
+  pool_max_age: 30 # pool must be recent (bars)
+
+  # --- Setup 1: sweep (Part 6.1) ---
+  sweep_min_pen: 0.0005 # meaningful sweep depth (>0.05%)
+  sweep_max_pen: 0.005 # not a crash (<0.5%)
+  sweep_body_max: 0.5 # sweep candle is mostly wick
+  sweep_close_tol: 0.0005 # close back near/above the level
+  sweep_buffer_pct: 0.0020 # SL buffer beyond the wick (15m: 4× wider for wick noise)
+  confirm_body_min: 0.4 # confirmation candle body
+  confirm_vol_min: 0.8
+
+  # --- Setup 2: break & retest (Part 6.2) ---
+  break_vol_min: 1.5 # break candle volume ratio
+  retest_tol: 0.0008 # retest zone tolerance
+
+  # --- risk / targets (Parts 6-8, 13) ---
+  max_stop_pct: 1.5 # Setup 1/3 max stop distance (%) — 15m wider
+  max_stop_pct_s2: 2.0 # Setup 2 max stop distance (%) — 15m wider
+  tp1_r: 1.0
+  tp2_r: 2.0
+  runner_r: 3.0 # live tp3 proxy (true swing-trailing is in the backtester)
+  rr_min: 1.5 # full-position R:R floor (pre-trade checklist)
+  anti_fomo_dist: 0.003 # 13.3 — skip if entry ran >0.3% past the zone w/ poor R:R
+  min_quality: 2 # Part 8 minimum quality score to enter
+  min_quality_s2: 5 # Setup 2 (break-retest) needs a higher floor — it's the bleeder
+
+  # --- volatility gates (Part 7.3 / 12.1) ---
+  atr_pct_min: 0.10 # below -> standby
+  atr_pct_max: 2.5 # above -> standby
+  atr_pct_high: 1.5 # high-but-tradeable -> Setup 1 only, wider stop

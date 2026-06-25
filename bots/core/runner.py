@@ -37,7 +37,13 @@ class Runner:
         self.client = BinanceFutures(cfg.api_key, cfg.api_secret, testnet=cfg.testnet,
                                      futures_base_url=cfg.futures_base_url)
         self.strategy = get_strategy(cfg.strategy)(cfg.params)
-        self.tm = TradeManager(self.client, cfg, self.notifier)
+        # Trap Master ships its own Part 9 active manager; everyone else uses the
+        # generic resting-bracket manager.
+        if cfg.strategy == "trap_master":
+            from .trap_master_trade_manager import TrapMasterTradeManager
+            self.tm = TrapMasterTradeManager(self.client, cfg, self.notifier)
+        else:
+            self.tm = TradeManager(self.client, cfg, self.notifier)
         self._last_ts: dict[str, int] = {}
         self._next_fetch: dict[str, float] = {}
         self._interval = _TF_SECONDS.get(cfg.timeframe, 300)
@@ -74,8 +80,12 @@ class Runner:
         # management uses position + order state — no klines needed, which keeps
         # the per-IP rate-limit usage low when running many bots.
         if self.tm.in_position(symbol):
+            # Active managers (e.g. Trap Master's Part 9 machine) need candles each
+            # poll to step the state machine; the generic manager only needs them
+            # in dry-run to simulate fills.
+            need_klines = self.cfg.dry_run or getattr(self.tm, "needs_klines", False)
             df = self.client.get_klines(symbol, self.cfg.timeframe, self.cfg.lookback_bars) \
-                if self.cfg.dry_run else None
+                if need_klines else None
             self.tm.manage(symbol, df)
             return
 

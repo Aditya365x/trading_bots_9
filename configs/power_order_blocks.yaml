@@ -1,0 +1,29 @@
+# Power Order Blocks — OB zone retest (ChartPrime port)
+name: power_order_blocks
+strategy: power_order_blocks
+symbols: [AVAXUSDT]            # unique coin -> no position clash on shared account
+timeframe: 15m          # primary trading TF
+market: futures
+
+leverage: 10
+risk_per_trade_pct: 1.0
+risk_usdt: 2
+max_position_usdt: 100
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  disp_thresh: 0.5          # engulfing body must exceed prior range × this
+  atr_len: 14
+  strength_lookback: 100    # window for the "power %" normalisation
+  max_blocks: 10
+  sl_buffer_atr: 0.2        # stop placed this far beyond the zone edge
+  retest_gap_bars: 10       # min bars between retest signals
+  min_power_pct: 0.0        # skip zones weaker than this (0 = keep all)
+  tp1: 1.0
+  tp2: 2.0
+  tp3: 3.0

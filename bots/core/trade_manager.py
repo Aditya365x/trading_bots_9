@@ -64,13 +64,16 @@ class TradeManager:
             return False
         return abs(self.client.get_position(symbol)["amt"]) > 0
 
-    def _size(self, symbol: str, entry: float, sl: float) -> float:
+    def _size(self, symbol: str, entry: float, sl: float, risk_mult: float = 1.0) -> float:
         risk_dist = abs(entry - sl)
         if risk_dist <= 0:
             return 0.0
         balance = 10_000.0 if self.cfg.dry_run else self.client.wallet_balance("USDT")
         # absolute $ risk if set, else % of balance
         risk_amt = self.cfg.risk_usdt if self.cfg.risk_usdt > 0 else balance * (self.cfg.risk_per_trade_pct / 100.0)
+        # strategies may scale risk per-signal via Signal.meta["risk_mult"] (e.g.
+        # Trap Master's quality score). Defaults to 1.0 for every other strategy.
+        risk_amt *= max(0.0, float(risk_mult))
         qty = risk_amt / risk_dist
         # cap by max notional (margin used = notional / leverage)
         notional_cap = self.cfg.max_position_usdt or (balance * self.cfg.leverage)
@@ -86,7 +89,8 @@ class TradeManager:
     # -------------------------------------------------------------- open #
     def open_trade(self, symbol: str, sig: Signal) -> None:
         entry = sig.entry
-        qty = self._size(symbol, entry, sig.sl)
+        risk_mult = float((sig.meta or {}).get("risk_mult", 1.0))
+        qty = self._size(symbol, entry, sig.sl, risk_mult)
         if qty <= 0:
             log.warning("%s skipped — position size resolved to 0", symbol)
             return

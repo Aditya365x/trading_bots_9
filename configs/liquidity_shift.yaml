@@ -1,0 +1,33 @@
+# Liquidity Shift Detection [LSD] — sweep + confirmation reversal (Zeiierman port,
+# PineScripts/liquiditySweep.pine).
+name: liquidity_shift
+strategy: liquidity_shift
+symbols: [ATOMUSDT]            # unique coin -> no position clash on shared account
+timeframe: 15m
+market: futures
+
+leverage: 10
+risk_per_trade_pct: 1.0
+risk_usdt: 0
+max_position_usdt: 100
+use_break_even: true
+tp_split: [0.40, 0.30, 0.30]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: true
+
+params:
+  # --- detection (Pine defaults) ---
+  swing_len: 8                    # pivot length for swing highs/lows
+  atr_len: 14
+  disp_mult: 1.20                 # displacement candle body ≥ ATR × this
+  max_bars_pending: 100           # bars to confirm a sweep before it expires
+  confirm_mode: both              # both | break | disp
+  # --- risk (added; Pine has no stop/targets) ---
+  sl_buffer_atr: 0.5              # SL beyond the sweep extreme, in ATR
+  min_stop_atr: 0.3               # floor on stop distance (× ATR)
+  max_stop_pct: 2.0               # skip if the stop is wider than this (%)
+  tp1_r: 1.0
+  tp2_r: 2.0
+  tp3_r: 3.0

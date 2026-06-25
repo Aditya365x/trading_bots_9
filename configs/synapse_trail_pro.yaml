@@ -2,7 +2,7 @@
 name: synapse_trail_pro
 strategy: synapse_trail_pro
 symbols: [SOLUSDT]    # unique coin -> no position clash on shared account
-timeframe: 5m
+timeframe: 15m          # primary trading TF
 market: futures
 
 leverage: 10

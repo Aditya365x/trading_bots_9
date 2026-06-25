@@ -2,7 +2,7 @@
 name: pulse_trend_radar
 strategy: pulse_trend_radar
 symbols: [ETHUSDT]    # unique coin -> no position clash on shared account
-timeframe: 5m
+timeframe: 15m          # primary trading TF
 market: futures
 
 leverage: 10

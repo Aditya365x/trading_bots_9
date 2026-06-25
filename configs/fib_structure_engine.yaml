@@ -2,7 +2,7 @@
 name: fib_structure_engine
 strategy: fib_structure_engine
 symbols: [TRXUSDT]    # unique coin -> no position clash on shared account
-timeframe: 5m
+timeframe: 15m          # primary trading TF
 market: futures
 
 leverage: 10

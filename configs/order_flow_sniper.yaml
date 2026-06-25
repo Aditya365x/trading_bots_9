@@ -1,0 +1,66 @@
+# Order Flow Sniper — complete institutional order-flow strategy (order_flow.md port)
+#
+# Implements all 14 episodes of the course: delta, CVD, VWAP bands,
+# absorption/exhaustion divergences, POC migration, initiative candles,
+# volume profile, liquidity voids, HVN bounces, CVD momentum, market-state.
+# 6 setups: Absorption Reversal, Exhaustion Reversal, VWAP Band Reversion,
+# Void Fill Continuation, Initiative Breakout, HVN Bounce.
+name: order_flow_sniper
+strategy: order_flow_sniper
+symbols: [APTUSDT]            # unique coin -> no position clash on shared account
+timeframe: 15m           # primary trading TF
+market: futures
+
+leverage: 10
+risk_per_trade_pct: 0.5   # course: risk exactly 0.5% equity per trade
+risk_usdt: 2
+max_position_usdt: 100
+use_break_even: true      # course: move SL to BE at TP1
+tp_split: [0.5, 0.25, 0.25]   # 50% off at TP1, trail the rest
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: true             # start in dry-run; flip to false once validated
+
+params:
+  # --- context / volume profile ---
+  profile_window: 120     # bars in the context volume profile (~30h on 15m)
+  profile_bins: 60        # price resolution of the profile
+  value_area_pct: 0.70    # 70% value area -> VAH/VAL
+  ctx_tol_atr: 0.5        # proximity (xATR) to count as "at" VAH/VAL
+
+  # --- effort / delta ---
+  vol_ma_len: 20
+  vol_spike_mult: 1.5     # bar volume >= 150% of 20-bar avg
+  delta_strong: 0.33      # |dimb| for a "directional" bar
+  absorb_close_pct: 0.25  # close within 25% of the extreme = absorbed
+
+  # --- structure ---
+  div_swing: 3            # bars in the "current" swing for divergence
+  div_lookback: 40        # window to find the prior swing
+  div_price_tol_atr: 0.1  # "equal highs/lows" tolerance (xATR)
+  stacked_n: 3            # consecutive imbalanced bars = stacked imbalance
+  void_min_levels: 3      # >=3 empty price bins = a liquidity void
+  void_frac: 0.10         # bin vol < 10% of mean-bin -> "empty"
+  retr_window: 8          # pullback window for void-dip detection
+
+  # --- VWAP bands (Ep 11) ---
+  vwap_band_sigma: 2.0    # sigma multiplier for the 2nd std-dev band
+
+  # --- CVD momentum ---
+  cvd_mom_len: 10         # bars for CVD rate-of-change
+
+  # --- initiative candle (Ep 13) ---
+  init_body_atr: 0.3      # min body as fraction of ATR for an initiative bar
+  init_delta_strong: 0.50 # |dimb| threshold for initiative bar
+
+  # --- HVN (high-volume nodes) ---
+  hvn_vol_mult: 1.5       # bin volume >= 1.5x mean-bin -> HVN
+
+  # --- risk ---
+  atr_len: 14
+  sl_buffer_atr: 0.2      # extra room beyond the absorbed extreme / void
+  min_rr: 1.5             # course: minimum 1.5R per trade
+
+  # --- session ---
+  rth_only: false         # course = RTH only; crypto is 24/7 so default off

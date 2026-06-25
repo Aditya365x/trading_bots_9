@@ -1,29 +1,52 @@
-# ===== SECRETS — never commit =====
-.env
-.env.local
-*.key
-*.pem
-
-# ===== Python venv (D: drive, machine-specific) =====
-venvbots/
-venv/
-.venv/
-
-# ===== caches / bytecode =====
-__pycache__/
-**/__pycache__/
-*.pyc
-*.pyo
-.pytest_cache/
-.mypy_cache/
-
-# ===== runtime output =====
+# Runtime / logs
 logs/
 *.log
-trades.csv
+data_cache/
+.cache/
+backtrader/
+Flowtrades/
+freqtrade/
 
-# ===== editor / OS =====
-.vscode/
-.idea/
+# Secrets
+.env
+*.secret
+
+# Docs / scrap
+*.pdf
+*.txt
+order_flow.md
+backtest.md
+price_action.md
+docs/
+strategies2/
+PineScripts/
+trap_master_backtestengine.py
+
+# OS / editor
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.whl
+venv/
+.venv/
+venvbots/
+
+# Docker / build
+*.tar
+*.img
+
+# Misc runtime
+*.csv
+*.json
+!requirements.txt
+!.env.example

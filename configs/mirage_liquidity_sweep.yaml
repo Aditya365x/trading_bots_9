@@ -1,0 +1,37 @@
+# Mirage Liquidity Sweep Pro — sweep + CHoCH confirmation (WillyAlgoTrader port)
+name: mirage_liquidity_sweep
+strategy: mirage_liquidity_sweep
+symbols: [TONUSDT]            # unique coin -> no position clash on shared account
+timeframe: 15m
+market: futures
+
+leverage: 10
+risk_per_trade_pct: 1.0
+risk_usdt: 2
+max_position_usdt: 100
+use_break_even: true
+tp_split: [0.34, 0.33, 0.33]
+
+lookback_bars: 600
+poll_seconds: 5
+dry_run: false
+
+params:
+  swing_len: 21             # major swing pivots = liquidity pools
+  max_sweep_bars: 80        # a swing can only be swept within this many bars
+  min_score: 50             # 0-100 sweep quality gate (45-60 balanced, 65+ strict)
+  require_confirm: true     # true: wait for CHoCH after sweep; false: fire on sweep bar
+  minor_len: 8              # minor pivots used for the CHoCH confirmation
+  confirm_window: 13        # bars to wait for CHoCH before the setup expires
+  use_volume: true
+  vol_len: 21
+  vol_mult: 1.5
+  use_htf: true
+  htf_ema_len: 200          # higher-timeframe trend-bias proxy (EMA on this TF)
+  risk_preset: Balanced     # Conservative | Balanced | Aggressive | Scalping | Custom
+  atr_len: 14
+  # used only when risk_preset = Custom:
+  sl_buffer_atr: 0.25
+  tp1: 1.0
+  tp2: 2.0
+  tp3: 3.0

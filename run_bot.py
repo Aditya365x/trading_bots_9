@@ -8,6 +8,11 @@ Examples (use the project venv on D:):
 
 Each bot trades the configured symbols on one timeframe with one strategy and
 reports every trade to Telegram. Run one process per bot (9 processes for 9 bots).
+
+New flags:
+  --async       Use the async runner with WebSocket + concurrency + regime + risk
+  --risk-method Choose sizing method: fixed_fractional (default), kelly, volatility_adjusted
+  --regime      Enable market regime detection (auto-activated with --async)
 """
 from __future__ import annotations
 
@@ -30,7 +35,25 @@ def main() -> int:
     ap.add_argument("--risk", dest="risk_per_trade_pct", type=float, help="Risk %% per trade")
     ap.add_argument("--dry-run", action="store_true", help="Compute + notify, do NOT send orders")
     ap.add_argument("--list", action="store_true", help="List available strategies and exit")
+    # New flags
+    ap.add_argument("--async", dest="use_async", action="store_true",
+                    help="Use async runner (WebSocket + regime + risk + concurrency)")
+    ap.add_argument("--risk-method", dest="risk_method", default="fixed_fractional",
+                    choices=["fixed_fractional", "kelly", "volatility_adjusted"],
+                    help="Position sizing method (default: fixed_fractional)")
+    ap.add_argument("--report", action="store_true",
+                    help="Print performance report from existing trades.csv and exit")
     args = ap.parse_args()
+
+    # Performance report mode
+    if args.report:
+        try:
+            from bots.core.analytics import summary_report
+            summary_report()
+        except Exception as exc:
+            print(f"Error generating report: {exc}", file=sys.stderr)
+            return 1
+        return 0
 
     if args.list:
         print("Available strategies:")
@@ -54,6 +77,10 @@ def main() -> int:
     if args.dry_run:
         overrides["dry_run"] = True
 
+    # Pass risk method through params if using async
+    if args.use_async:
+        overrides.setdefault("params", {})["risk_method"] = args.risk_method
+
     cfg = BotConfig.load(args.config, overrides)
     if not args.config and not args.strategy:
         ap.error("Provide --config or --strategy")
@@ -63,7 +90,18 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    Runner(cfg).run()
+    # Choose runner
+    if args.use_async:
+        try:
+            from bots.core.async_runner import AsyncRunner
+            runner = AsyncRunner(cfg)
+            runner.run_sync()  # run async in a sync wrapper
+        except ImportError as exc:
+            print(f"Async runner not available: {exc}. Falling back to sync runner.",
+                  file=sys.stderr)
+            Runner(cfg).run()
+    else:
+        Runner(cfg).run()
     return 0
 
 

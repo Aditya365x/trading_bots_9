@@ -25,7 +25,7 @@ class BotConfig:
 
     # --- market ---
     symbols: list[str] = field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
-    timeframe: str = "5m"                    # 1m,3m,5m,15m,30m,1h,...
+    timeframe: str = "15m"                    # 1m,3m,5m,15m,30m,1h,...
     market: str = "futures"                  # futures (USDT-M). spot reserved.
 
     # --- risk / sizing ---

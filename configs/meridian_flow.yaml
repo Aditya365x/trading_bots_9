@@ -2,7 +2,7 @@
 name: meridian_flow
 strategy: meridian_flow
 symbols: [XRPUSDT]    # unique coin -> no position clash on shared account
-timeframe: 5m
+timeframe: 15m          # primary trading TF
 market: futures
 
 leverage: 10

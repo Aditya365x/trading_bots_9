@@ -1,0 +1,87 @@
+backtest:
+  symbols:
+    - "BTCUSDT"
+    - "ETHUSDT"
+    - "XRPUSDT"
+    - "SOLUSDT"
+
+  timeframes:
+    list: ["5m", "15m", "1h"]   # 1m dropped: pure noise for order flow (-744R)
+    primary: "15m"
+    secondary: "1m"
+
+  days: 30
+  initial_capital: 10000
+
+  # Period selection:
+  #   previous_month — the previous full calendar month (default)
+  #   trailing       — the last `days` ending now
+  #   explicit       — use start/end below (ISO UTC dates)
+  period:
+    mode: "previous_month"
+    # start: "2026-05-01"
+    # end:   "2026-06-01"
+
+  trading:
+    commission: 0.0004
+    slippage: 0.0001
+    risk_per_trade_pct: 0.5
+
+strategy:
+  enabled_setups: ["A", "B", "D", "E", "F"]   # C (VWAP band) disabled: -810R bleeder
+  profile_window: 100
+  profile_bins: 40
+  value_area_pct: 0.68
+  ctx_tol_atr: 1.5
+  vol_ma_len: 15
+  vol_spike_mult: 1.2
+  delta_strong: 0.15
+  absorb_close_pct: 0.35
+  div_swing: 2
+  div_lookback: 25
+  div_price_tol_atr: 0.3
+  stacked_n: 2
+  void_min_levels: 2
+  void_frac: 0.12
+  retr_window: 6
+  vwap_band_sigma: 1.8
+  cvd_mom_len: 8
+  init_body_atr: 0.15
+  init_delta_strong: 0.20
+  hvn_vol_mult: 1.3
+  atr_len: 14
+  sl_buffer_atr: 0.3
+  min_rr: 1.0
+  rth_only: false
+
+strategy_1m:
+  enabled_setups: ["A", "B", "D", "E", "F"]   # (unused now 1m is dropped)
+  profile_window: 200
+  profile_bins: 60
+  value_area_pct: 0.68
+  ctx_tol_atr: 1.0
+  vol_ma_len: 25
+  vol_spike_mult: 1.3
+  delta_strong: 0.18
+  absorb_close_pct: 0.30
+  div_swing: 3
+  div_lookback: 40
+  div_price_tol_atr: 0.25
+  stacked_n: 3
+  void_min_levels: 3
+  void_frac: 0.10
+  retr_window: 10
+  vwap_band_sigma: 1.8
+  cvd_mom_len: 12
+  init_body_atr: 0.20
+  init_delta_strong: 0.25
+  hvn_vol_mult: 1.5
+  atr_len: 14
+  sl_buffer_atr: 0.3
+  min_rr: 1.0
+  rth_only: false
+
+output:
+  save_trades: true
+  save_equity_curve: true
+  generate_report: true

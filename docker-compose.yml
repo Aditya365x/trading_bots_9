@@ -1,12 +1,19 @@
-# Run all 9 bots as separate containers. They share one image and the .env
-# (testnet keys + Telegram). Each bot = one service = one process.
+# Run all 18 bots as separate containers. They share one image and the .env
+# (keys + Telegram). Each bot = one service = one process.
 #
 #   docker compose build
-#   docker compose up -d            # start all 9
+#   docker compose up -d            # start all 18
 #   docker compose logs -f precision_sniper
 #   docker compose down            # stop all
 #
 # To run only some bots:  docker compose up -d precision_sniper pulse_trend_radar
+#
+# ⚠ SHARED-ACCOUNT POSITION CLASH: on ONE Binance account (one-way mode) all
+# positions in a symbol NET into one. The first 9 bots each trade a UNIQUE coin
+# to avoid this. Several newer bots reuse BTC/ETH/SOL (see below) and WILL fight
+# each other's position/brackets unless you give each its own API key
+# (BINANCE_KEY_<NAME>/BINANCE_SECRET_<NAME> = separate sub-accounts) or dedupe
+# symbols. Newer bots default to dry_run: true; keep them there until validated.
 
 x-bot: &bot
   build: .
@@ -43,3 +50,30 @@ services:
   ict_session_zones:
     <<: *bot
     environment: { CONFIG: configs/ict_session_zones.yaml }
+  mlrsi:
+    <<: *bot
+    environment: { CONFIG: configs/mlrsi.yaml }
+  power_order_blocks:
+    <<: *bot
+    environment: { CONFIG: configs/power_order_blocks.yaml }
+  anchored_vwap:
+    <<: *bot
+    environment: { CONFIG: configs/anchored_vwap.yaml }
+  mirage_liquidity_sweep:
+    <<: *bot
+    environment: { CONFIG: configs/mirage_liquidity_sweep.yaml }
+  bollinger_breakout:
+    <<: *bot
+    environment: { CONFIG: configs/bollinger_breakout.yaml }
+  order_flow_sniper:
+    <<: *bot
+    environment: { CONFIG: configs/order_flow_sniper.yaml }
+  trap_master:
+    <<: *bot
+    environment: { CONFIG: configs/trap_master.yaml }
+  mlsmc:
+    <<: *bot
+    environment: { CONFIG: configs/mlsmc.yaml }
+  liquidity_shift:
+    <<: *bot
+    environment: { CONFIG: configs/liquidity_shift.yaml }

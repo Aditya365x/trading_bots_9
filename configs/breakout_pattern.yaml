@@ -2,7 +2,7 @@
 name: breakout_pattern
 strategy: breakout_pattern
 symbols: [BNBUSDT]    # unique coin -> no position clash on shared account
-timeframe: 5m
+timeframe: 15m          # 15m sweet spot (backtest)
 market: futures
 
 leverage: 10

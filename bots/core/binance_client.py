@@ -54,13 +54,16 @@ class BinanceFutures:
         cols = ["open_time", "open", "high", "low", "close", "volume",
                 "close_time", "qav", "trades", "tbav", "tqav", "ignore"]
         df = pd.DataFrame(raw, columns=cols)
-        for c in ["open", "high", "low", "close", "volume"]:
+        for c in ["open", "high", "low", "close", "volume", "tbav"]:
             df[c] = df[c].astype(float)
+        # Real aggressive-BUY volume (taker hit the ask). Order-flow strategies
+        # use this for true per-bar delta / CVD; others simply ignore the column.
+        df["taker_buy_volume"] = df["tbav"]
         df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
         df.set_index("open_time", inplace=True)
         # Drop the still-forming last candle so we only act on closed bars.
         df = df.iloc[:-1]
-        return df[["open", "high", "low", "close", "volume"]]
+        return df[["open", "high", "low", "close", "volume", "taker_buy_volume"]]
 
     # ----------------------------------------------------------- precision #
     def _load_filters(self, symbol: str) -> dict:

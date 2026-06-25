@@ -2,7 +2,7 @@
 name: adaptive_fib_trailing
 strategy: adaptive_fib_trailing
 symbols: [DOGEUSDT]    # unique coin -> no position clash on shared account
-timeframe: 5m
+timeframe: 15m          # primary trading TF
 market: futures
 
 leverage: 10

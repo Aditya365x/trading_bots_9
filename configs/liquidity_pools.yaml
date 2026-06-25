@@ -2,7 +2,7 @@
 name: liquidity_pools
 strategy: liquidity_pools
 symbols: [ZECUSDT]    # unique coin -> no position clash on shared account
-timeframe: 5m
+timeframe: 15m          # primary trading TF
 market: futures
 
 leverage: 10

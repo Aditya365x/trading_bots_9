@@ -1,0 +1,45 @@
+# Precision Sniper async mode with full risk management + regime detection
+# Usage: run_bot.py --config configs/precision_sniper_async.yaml --async
+name: precision_sniper_pro
+strategy: precision_sniper
+symbols: [BTCUSDT, ETHUSDT] # Multiple symbols processed concurrently
+timeframe: 15m # primary trading TF
+market: futures
+
+# --- Leverage & Risk ---
+leverage: 10
+risk_per_trade_pct: 0.5 # 0.5% per trade (conservative for low TF)
+risk_usdt: 2.0 # Override: max $2 risk per trade
+max_position_usdt: 100 # $10 margin x 10x leverage = $100 notional
+use_break_even: true
+tp_split: [0.40, 0.30, 0.30] # Heavier TP1 for quick scalps on 15m
+
+# --- Professional Risk Management (async mode only) ---
+params:
+  risk_method: fixed_fractional # Options: fixed_fractional, kelly, volatility_adjusted
+  kelly_fraction: 0.25 # 25% of full Kelly
+  max_daily_loss_pct: 5.0 # Circuit breaker: stop after 5% daily loss
+  max_consecutive_losses: 5 # Circuit breaker: stop after 5 losses in a row
+  max_open_positions: 3 # Max simultaneous positions across symbols
+
+  # --- Strategy params ---
+  ema_fast: 9
+  ema_slow: 21
+  ema_trend: 55
+  rsi_len: 13
+  atr_len: 14
+  min_score: 5
+  sl_mult: 1.5 # Base SL multiplier (regime-adjusted)
+  tp1: 1.0
+  tp2: 2.0
+  tp3: 3.0
+  swing_lookback: 10
+  grade_filter: "All"
+  hide_c_grade: true
+  high_vol_thresh: 1.3
+  skip_high_vol: true
+
+# --- Engine ---
+lookback_bars: 600
+poll_seconds: 5 # Used only in sync/fallback mode
+dry_run: true # SET TO FALSE FOR LIVE TRADING

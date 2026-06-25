@@ -14,6 +14,15 @@ _REGISTRY = {
     "liquidity_pools":      ("liquidity_pools", "LiquidityPools"),
     "fib_structure_engine": ("fib_structure_engine", "FibStructureEngine"),
     "ict_session_zones":    ("ict_session_zones", "IctSessionZones"),
+    "mlrsi":                ("mlrsi", "MLRSI"),
+    "power_order_blocks":   ("power_order_blocks", "PowerOrderBlocks"),
+    "anchored_vwap":        ("anchored_vwap", "AnchoredVWAP"),
+    "mirage_liquidity_sweep": ("mirage_liquidity_sweep", "MirageLiquiditySweep"),
+    "bollinger_breakout":   ("bollinger_breakout", "BollingerBreakout"),
+    "order_flow_sniper":    ("order_flow_sniper", "OrderFlowSniper"),
+    "trap_master":          ("trap_master", "TrapMaster"),
+    "mlsmc":                ("mlsmc", "MLSMC"),
+    "liquidity_shift":      ("liquidity_shift", "LiquidityShift"),
 }
 
 
